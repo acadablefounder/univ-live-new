@@ -24,7 +24,7 @@ type TenantContextValue = {
 const TenantContext = createContext<TenantContextValue | null>(null);
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
-  // AuthProvider is just used to ensure auth is ready, but we don't use profile here anymore for security
+  // We strictly use AuthProvider here just to ensure context is ready
   const { } = useAuth(); 
   
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
@@ -47,7 +47,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       }
 
       try {
-        const q = query(collection(db, "educators"), where("slug", "==", tenantSlug));
+        const q = query(collection(db, "educators"), where("tenantSlug", "==", tenantSlug));
         const snaps = await getDocs(q);
         
         if (mounted && !snaps.empty) {
@@ -73,7 +73,8 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     return () => { mounted = false; };
   }, [tenantSlug]);
 
-  // ❌ IMPORTANT: No security useEffect here. It is gone.
+  // 🚨 CRITICAL: The security useEffect that was here is REMOVED.
+  // Security is now handled exclusively by StudentRoute.tsx
 
   const value: TenantContextValue = {
     tenant,
