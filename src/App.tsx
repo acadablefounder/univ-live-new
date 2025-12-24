@@ -41,11 +41,17 @@ import StudentRankings from "./pages/student/StudentRankings";
 import StudentAnalytics from "./pages/student/StudentAnalytics";
 import StudentMessages from "./pages/student/StudentMessages";
 import StudentSettings from "./pages/student/StudentSettings";
+import { AuthProvider } from "@/contexts/AuthProvider";
+
 
 const queryClient = new QueryClient();
 
 const App = () => (
+
+
+
   <QueryClientProvider client={queryClient}>
+  <AuthProvider>
     <TooltipProvider>
       <Toaster />
       <Sonner />
@@ -114,6 +120,7 @@ const App = () => (
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
+    </AuthProvider>
   </QueryClientProvider>
 );
 
