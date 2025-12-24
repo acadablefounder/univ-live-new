@@ -85,6 +85,7 @@ export default function Login() {
       }
       
       toast.success("Welcome back!");
+      navigate("/student");
 
     } catch (error: any) {
       console.error("Login error:", error);
