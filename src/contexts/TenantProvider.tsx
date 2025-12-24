@@ -1,11 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { getTenantSlugFromHostname } from "@/lib/tenant";
-import { db, auth } from "@/lib/firebase";
+import { db } from "@/lib/firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { useAuth } from "@/contexts/AuthProvider";
-import { signOut } from "firebase/auth";
-import { toast } from "sonner";
 
+// Define the shape of the Tenant Data
 export type TenantProfile = {
   educatorId: string;
   tenantSlug: string;
@@ -26,46 +25,42 @@ type TenantContextValue = {
 const TenantContext = createContext<TenantContextValue | null>(null);
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
-  const { profile } = useAuth();
+  const { profile } = useAuth(); // AuthProvider MUST wrap TenantProvider
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   const tenantSlug = getTenantSlugFromHostname();
   const isTenantDomain = !!tenantSlug;
 
-  // 1. Load Tenant Data (Standard logic - unchanged)
+  // 1. Load Tenant Data (Coaching Info)
   useEffect(() => {
     let mounted = true;
     async function loadTenant() {
       setLoading(true);
       setTenant(null);
+      
+      // If we are on main domain (localhost or univ.live), no tenant to load
       if (!tenantSlug) {
         setLoading(false);
         return;
       }
 
       try {
-        const q = query(collection(db, "educators"), where("slug", "==", tenantSlug)); // Note: Ensure field is 'slug' or 'tenantSlug' based on your DB
+        const q = query(collection(db, "educators"), where("slug", "==", tenantSlug));
         const snaps = await getDocs(q);
-        if (!mounted) return;
-
-        if (!snaps.empty) {
+        
+        if (mounted && !snaps.empty) {
           const d = snaps.docs[0].data() as any;
           setTenant({
             educatorId: snaps.docs[0].id,
-            tenantSlug: d.slug || d.tenantSlug || tenantSlug, // Handle variations
-            coachingName: d.coachingName || "",
-            tagline: d.tagline || "",
-            contact: d.contact || {},
-            socials: d.socials || {},
-            websiteConfig: d.websiteConfig || null,
+            tenantSlug: d.slug, 
+            coachingName: d.coachingName,
+            tagline: d.tagline,
+            websiteConfig: d.websiteConfig,
           });
-        } else {
-          setTenant(null);
         }
       } catch (err) {
         console.error("Failed to load tenant", err);
-        setTenant(null);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -75,36 +70,8 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     return () => { mounted = false; };
   }, [tenantSlug]);
 
-  // 2. Enforce Security (UPDATED & SAFE)
-  useEffect(() => {
-    if (!profile || !isTenantDomain || !tenantSlug) return;
-
-    if (profile.role === "STUDENT") {
-      
-      // --- 🛡️ SAFETY LOGIC START ---
-      // 1. Check New Array
-      const enrolledList = profile.enrolledTenants || [];
-      
-      // 2. Check Old String (For Legacy Users)
-      const legacyMatch = profile.tenantSlug === tenantSlug;
-      
-      // 3. Allow if EITHER is true
-      const isAuthorized = enrolledList.includes(tenantSlug) || legacyMatch;
-      // --- 🛡️ SAFETY LOGIC END ---
-
-      if (!isAuthorized) {
-        (async () => {
-          try {
-            await signOut(auth);
-          } catch (e) {
-             // ignore
-          } finally {
-            toast.error("You are not registered with this coaching institute. Please Register first.");
-          }
-        })();
-      }
-    }
-  }, [profile, isTenantDomain, tenantSlug]);
+  // NOTE: The previous security useEffect that forced signOut is REMOVED.
+  // Security is now handled by the StudentRoute component.
 
   const value: TenantContextValue = {
     tenant,
