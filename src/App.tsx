@@ -11,8 +11,8 @@ import { TenantProvider, useTenant } from "@/contexts/TenantProvider";
 /* =========================
    TENANT PAGES
 ========================= */
-import TenantHome from "@/pages/tenant/TenantHome";
-import TenantCourses from "@/pages/tenant/TenantCourses";
+import TenantHome from "@/themes/coaching/theme1/TenantHome";
+import TenantCourses from "@/themes/coaching/theme1/TenantCourses";
 
 /* =========================
    MAIN WEBSITE PAGES
