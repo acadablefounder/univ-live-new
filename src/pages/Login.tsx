@@ -122,7 +122,7 @@ export default function Login() {
           </div>
 
           {/* Role Toggle Tabs - Only show on Main Domain to reduce confusion */}
-          {!isTenantDomain && (
+          {true && (
              <div className="grid grid-cols-2 gap-2 bg-muted p-1 rounded-lg">
                <button
                  onClick={() => setRole("educator")}

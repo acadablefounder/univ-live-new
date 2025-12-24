@@ -138,7 +138,7 @@ export default function Signup() {
         });
         
         toast.success("Academy created!");
-        window.location.href = `http://${generatedSlug}.localhost:5173/dashboard`;
+        window.location.href = `http://${generatedSlug}.univ.live/dashboard`;
       }
 
     } catch (error: any) {

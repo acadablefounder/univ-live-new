@@ -89,7 +89,14 @@ export default function AppRoutes() {
             }
           >
             <Route index element={<EducatorDashboard />} />
-            {/* Add other educator routes if they manage from subdomain */}
+            <Route path="learners" element={<Learners />} />
+            <Route path="test-series" element={<TestSeries />} />
+            <Route path="access-codes" element={<AccessCodes />} />
+            <Route path="analytics" element={<Analytics />} />
+            <Route path="messages" element={<Messages />} />
+            <Route path="website-settings" element={<WebsiteSettings />} />
+            <Route path="billing" element={<Billing />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
 
           <Route path="*" element={<NotFound />} />
