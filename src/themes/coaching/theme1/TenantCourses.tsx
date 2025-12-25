@@ -8,6 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Loader2, FileText, ArrowRight, Search, BookOpen, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import Theme1CTA from "./Theme1CTA";
+import Theme1FAQ from "./Theme1FAQ";
+import Theme1Layout from "./Theme1Layout";
 
 type TestSeries = {
   id: string;
@@ -72,7 +75,9 @@ export default function TenantCourses() {
   if (!tenant) return null;
 
   return (
-    <div className="container py-20 min-h-screen">
+    <Theme1Layout>
+      
+      <div className="container py-20 min-h-screen">
       <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
         <div>
            <h1 className="text-3xl font-bold mb-2">All Test Series</h1>
@@ -155,5 +160,10 @@ export default function TenantCourses() {
         </div>
       )}
     </div>
+
+      <Theme1FAQ />
+      <Theme1CTA />
+  </Theme1Layout>
+    
   );
 }

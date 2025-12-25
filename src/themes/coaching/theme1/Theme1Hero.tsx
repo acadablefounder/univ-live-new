@@ -1,16 +1,22 @@
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, Play, Star, Users, Award, BookOpen } from "lucide-react";
+import { ArrowRight, Play, Star, Users, Award, BookOpen, ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTenant } from "@/contexts/TenantProvider";
 
 export default function Theme1Hero() {
   const { tenant } = useTenant();
 
-  // Index.tsx already guards loading + null tenant
   if (!tenant) return null;
 
-  const stats = tenant.websiteConfig?.stats || [];
+  // --- 1. Access the Config ---
+  const config = tenant.websiteConfig || {};
+  
+  // --- 2. Define Variables with Fallbacks ---
+  const coachingName = config.coachingName || "Your Institute";
+  const tagline = config.tagline || "Empowering the next generation of leaders";
+  const heroImage = config.heroImage; // We will handle null later
+  const stats = config.stats || [];
 
   return (
     <section className="relative overflow-hidden bg-gradient-to-br from-pastel-mint/30 via-background to-pastel-lavender/30 py-16 lg:py-24">
@@ -22,95 +28,88 @@ export default function Theme1Hero() {
 
       <div className="container mx-auto px-4 relative">
         <div className="grid lg:grid-cols-2 gap-12 items-center">
-          {/* Content */}
+          
+          {/* --- Left Column: Text Content --- */}
           <motion.div
             initial={{ opacity: 0, x: -30 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6 }}
             className="text-center lg:text-left"
           >
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary text-sm font-medium mb-6">
-              <Star className="h-4 w-4 fill-primary" />
-              Trusted by {stats[0]?.value || "10,000+"} Students
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white dark:bg-muted/50 border shadow-sm mb-6">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+              </span>
+              <span className="text-xs font-medium">Admissions Open 2024-25</span>
             </div>
 
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold leading-tight mb-6">
-              {tenant.websiteConfig?.heroTitle || tenant.coachingName}
+            {/* DYNAMIC COACHING NAME */}
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-6">
+              Welcome to <br />
+              <span className="text-primary">{coachingName}</span>
             </h1>
 
+            {/* DYNAMIC TAGLINE */}
             <p className="text-lg text-muted-foreground mb-8 max-w-xl mx-auto lg:mx-0">
-              {tenant.websiteConfig?.heroSubtitle || tenant.tagline}
+              {tagline}
             </p>
 
             <div className="flex flex-col sm:flex-row items-center gap-4 justify-center lg:justify-start">
-              <Button size="lg" className="gradient-bg rounded-full text-lg px-8" asChild>
-                <Link to="/courses">
-                  Explore Courses
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Link>
-              </Button>
-              <Button size="lg" variant="outline" className="rounded-full text-lg px-8">
-                <Play className="mr-2 h-5 w-5" />
-                Watch Demo
+              <Link to="/courses">
+                <Button size="lg" className="gradient-bg text-white shadow-lg shadow-primary/20 h-12 px-8 rounded-full">
+                  Explore Courses <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </Link>
+              <Button variant="outline" size="lg" className="h-12 px-8 rounded-full">
+                <Play className="mr-2 h-4 w-4 fill-current" /> Watch Demo
               </Button>
             </div>
 
-            {/* Trust Badges */}
-            <div className="flex flex-wrap items-center gap-6 mt-10 justify-center lg:justify-start">
-              <StatCard icon={<Users />} stat={stats[0]} />
-              <StatCard icon={<Award />} stat={stats[1]} />
-              <StatCard icon={<BookOpen />} stat={stats[2]} />
-            </div>
+            {/* DYNAMIC STATS */}
+            {stats.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mt-12 pt-8 border-t">
+                {stats.map((stat: any, index: number) => (
+                  <StatCard key={index} icon={getIcon(stat.icon)} stat={stat} />
+                ))}
+              </div>
+            )}
           </motion.div>
 
-          {/* Illustration */}
+          {/* --- Right Column: Hero Image --- */}
           <motion.div
-            initial={{ opacity: 0, x: 30 }}
-            animate={{ opacity: 1, x: 0 }}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.6, delay: 0.2 }}
             className="relative"
           >
-            <div className="relative bg-gradient-to-br from-primary/20 to-accent/20 rounded-3xl p-8 lg:p-12">
-              <div className="grid grid-cols-2 gap-4">
-                {stats.slice(0, 4).map((s: any, i: number) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.4 + i * 0.1 }}
-                    className="card-soft p-4 text-center"
-                  >
-                    <div className="text-3xl font-bold text-primary">
-                      {s?.value}
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {s?.label}
-                    </p>
-                  </motion.div>
-                ))}
-              </div>
-
-              {/* Floating Cards */}
-              <motion.div
-                animate={{ y: [0, -10, 0] }}
-                transition={{ repeat: Infinity, duration: 3 }}
-                className="absolute -top-4 -right-4 bg-white dark:bg-card rounded-2xl shadow-lg p-3"
-              >
-                <div className="flex items-center gap-2">
-                  <Award className="h-4 w-4 text-green-600" />
-                  <div className="text-sm">
-                    <p className="font-semibold">AIR 45</p>
-                    <p className="text-xs text-muted-foreground">Our Student</p>
-                  </div>
+            <div className="relative rounded-[2rem] overflow-hidden shadow-2xl border-4 border-white dark:border-card aspect-square max-w-md mx-auto">
+              {heroImage ? (
+                <img
+                  src={heroImage}
+                  alt={coachingName}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-muted flex flex-col items-center justify-center text-muted-foreground">
+                   <ImageIcon className="h-16 w-16 mb-4 opacity-20" />
+                   <p className="text-sm">No Hero Image Set</p>
                 </div>
-              </motion.div>
-
+              )}
+              
+              {/* Floating Badge Example (Static for visual appeal) */}
               <motion.div
-                animate={{ y: [0, 10, 0] }}
-                transition={{ repeat: Infinity, duration: 3, delay: 1 }}
-                className="absolute -bottom-4 -left-4 bg-white dark:bg-card rounded-2xl shadow-lg p-3"
+                animate={{ y: [-10, 0, -10] }}
+                transition={{ repeat: Infinity, duration: 3 }}
+                className="absolute top-8 -right-4 bg-white dark:bg-card rounded-xl shadow-lg p-3 flex items-center gap-3"
               >
-                <p className="text-xs font-medium">500+ enrolled today</p>
+                <div className="h-10 w-10 bg-yellow-100 rounded-full flex items-center justify-center text-yellow-600">
+                  <Award className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Achievement</p>
+                  <p className="text-sm font-bold">#1 Rated</p>
+                </div>
               </motion.div>
             </div>
           </motion.div>
@@ -120,18 +119,27 @@ export default function Theme1Hero() {
   );
 }
 
-function StatCard({ icon, stat }: { icon: React.ReactNode; stat?: any }) {
-  if (!stat) return null;
+// Helper to map string icon names to Lucide components
+function getIcon(name: string) {
+  switch (name) {
+    case "Users": return <Users className="h-5 w-5 text-primary" />;
+    case "Trophy": return <Award className="h-5 w-5 text-primary" />;
+    case "BookOpen": return <BookOpen className="h-5 w-5 text-primary" />;
+    case "Star": return <Star className="h-5 w-5 text-primary" />;
+    default: return <Users className="h-5 w-5 text-primary" />;
+  }
+}
+
+function StatCard({ icon, stat }: { icon: React.ReactNode; stat: any }) {
   return (
-    <div className="flex items-center gap-2">
-      <div className="h-10 w-10 rounded-full bg-pastel-mint flex items-center justify-center">
+    <div className="flex items-center gap-3">
+      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
         {icon}
       </div>
       <div className="text-left">
-        <p className="font-bold text-lg">{stat.value}</p>
-        <p className="text-xs text-muted-foreground">{stat.label}</p>
+        <p className="font-bold text-xl leading-none">{stat.value}</p>
+        <p className="text-xs text-muted-foreground mt-1">{stat.label}</p>
       </div>
     </div>
   );
 }
-
