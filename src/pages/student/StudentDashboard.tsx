@@ -3,7 +3,17 @@ import { Link } from "react-router-dom";
 import { FileText, Target, Trophy, TrendingUp, Play, ArrowRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { StudentMetricCard } from "@/components/student/StudentMetricCard";
 import { AttemptTable } from "@/components/student/AttemptTable";
 import { toast } from "sonner";
@@ -23,19 +33,25 @@ import {
   where,
 } from "firebase/firestore";
 
-type AttemptStatus = "in-progress" | "submitted";
+type AttemptStatus = "in-progress" | "completed" | "expired";
 
-type Attempt = {
+type AttemptRow = {
   id: string;
   testId: string;
   testTitle: string;
   subject: string;
   status: AttemptStatus;
+
   score: number;
   maxScore: number;
-  accuracyPct: number;
-  createdAtMs: number;
-  submittedAtMs?: number;
+  accuracy: number; // percent 0..100
+  timeSpent: number; // seconds
+
+  // AttemptTable expects these too (we keep safe defaults)
+  rank: number;
+  totalParticipants: number;
+
+  createdAt: string; // AttemptTable uses new Date(createdAt)
 };
 
 type UserDoc = {
@@ -64,9 +80,18 @@ function accuracyFrom(score: number, maxScore: number) {
 }
 
 function formatDateLabel(ms: number) {
-  // compact label: "25 Dec"
   const d = new Date(ms);
   return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+}
+
+function normalizeStatus(raw: any): AttemptStatus {
+  const s = String(raw || "").toLowerCase();
+
+  if (s === "in-progress" || s === "inprogress" || s === "running" || s === "started") return "in-progress";
+  if (s === "expired" || s === "timeout") return "expired";
+
+  // treat everything else as completed: submitted/completed/finished/done
+  return "completed";
 }
 
 export default function StudentDashboard() {
@@ -76,14 +101,17 @@ export default function StudentDashboard() {
   const educatorId = tenant?.educatorId || profile?.educatorId || null;
 
   const [userDoc, setUserDoc] = useState<UserDoc | null>(null);
-  const [attempts, setAttempts] = useState<Attempt[]>([]);
+  const [attempts, setAttempts] = useState<AttemptRow[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [rank, setRank] = useState<number | null>(null);
+  const [totalParticipants, setTotalParticipants] = useState<number>(0);
 
   const canLoad = useMemo(() => {
     return !authLoading && !tenantLoading && !!firebaseUser?.uid && !!educatorId;
   }, [authLoading, tenantLoading, firebaseUser?.uid, educatorId]);
 
-  // 1) Load user profile (users/{uid}) once
+  // 1) Load user profile (users/{uid})
   useEffect(() => {
     let mounted = true;
 
@@ -114,7 +142,6 @@ export default function StudentDashboard() {
 
     setLoading(true);
 
-    // latest attempts (both in-progress + submitted)
     const qAttempts = query(
       collection(db, "attempts"),
       where("studentId", "==", firebaseUser!.uid),
@@ -126,23 +153,37 @@ export default function StudentDashboard() {
     const unsub = onSnapshot(
       qAttempts,
       (snap) => {
-        const rows: Attempt[] = snap.docs.map((d) => {
+        const rows: AttemptRow[] = snap.docs.map((d) => {
           const a = d.data() as any;
 
           const score = safeNum(a?.score, 0);
           const maxScore = safeNum(a?.maxScore, 0);
 
-          const accuracyPct =
+          const accuracy =
             a?.accuracy != null
               ? (() => {
                   const n = Number(a.accuracy);
-                  const pct = Number.isFinite(n) ? (n <= 1.01 ? n * 100 : n) : accuracyFrom(score, maxScore);
+                  const pct =
+                    Number.isFinite(n)
+                      ? n <= 1.01
+                        ? n * 100
+                        : n
+                      : accuracyFrom(score, maxScore);
                   return Math.max(0, Math.min(100, Math.round(pct)));
                 })()
               : accuracyFrom(score, maxScore);
 
-          const statusRaw = String(a?.status || "submitted");
-          const status: AttemptStatus = statusRaw === "in-progress" ? "in-progress" : "submitted";
+          const createdAtMs = toMillis(a?.createdAt);
+          const startedAtMs = toMillis(a?.startedAt || a?.createdAt);
+          const submittedAtMs = a?.submittedAt ? toMillis(a?.submittedAt) : undefined;
+
+          // prefer stored timeSpent; else compute
+          const computedSeconds =
+            submittedAtMs != null ? Math.max(0, Math.round((submittedAtMs - startedAtMs) / 1000)) : 0;
+
+          const timeSpent = safeNum(a?.timeSpent, computedSeconds);
+
+          const status = normalizeStatus(a?.status);
 
           return {
             id: d.id,
@@ -150,11 +191,17 @@ export default function StudentDashboard() {
             testTitle: String(a?.testTitle || "Test"),
             subject: String(a?.subject || "General Test"),
             status,
+
             score,
             maxScore,
-            accuracyPct,
-            createdAtMs: toMillis(a?.createdAt),
-            submittedAtMs: a?.submittedAt ? toMillis(a?.submittedAt) : undefined,
+            accuracy,
+            timeSpent,
+
+            // we’ll set these later after rank calculation (safe defaults)
+            rank: 0,
+            totalParticipants: 0,
+
+            createdAt: new Date(createdAtMs).toISOString(),
           };
         });
 
@@ -172,6 +219,58 @@ export default function StudentDashboard() {
     return () => unsub();
   }, [canLoad, authLoading, tenantLoading, firebaseUser, educatorId]);
 
+  // 3) Compute rank (best-effort)
+  useEffect(() => {
+    if (!canLoad) return;
+
+    const qTop = query(
+      collection(db, "attempts"),
+      where("educatorId", "==", educatorId!),
+      where("status", "in", ["completed", "submitted", "finished", "done"]), // handle older values
+      orderBy("score", "desc"),
+      limit(300)
+    );
+
+    const unsub = onSnapshot(
+      qTop,
+      (snap) => {
+        const best: Record<string, number> = {};
+
+        snap.docs.forEach((d) => {
+          const a = d.data() as any;
+          const sid = String(a?.studentId || "");
+          if (!sid) return;
+          const sc = safeNum(a?.score, 0);
+          best[sid] = Math.max(best[sid] || 0, sc);
+        });
+
+        const sorted = Object.entries(best)
+          .sort((a, b) => b[1] - a[1])
+          .map(([studentId]) => studentId);
+
+        const idx = sorted.findIndex((id) => id === firebaseUser!.uid);
+        setRank(idx >= 0 ? idx + 1 : null);
+        setTotalParticipants(sorted.length);
+      },
+      (err) => {
+        console.error(err);
+        setRank(null);
+        setTotalParticipants(0);
+      }
+    );
+
+    return () => unsub();
+  }, [canLoad, educatorId, firebaseUser]);
+
+  // attach rank/participants to attempts (so AttemptTable can show safely)
+  const attemptsWithRank = useMemo(() => {
+    return attempts.map((a) => ({
+      ...a,
+      rank: a.status === "completed" && rank ? rank : 0,
+      totalParticipants: a.status === "completed" ? totalParticipants : 0,
+    }));
+  }, [attempts, rank, totalParticipants]);
+
   const firstName = useMemo(() => {
     const name =
       userDoc?.displayName ||
@@ -182,23 +281,28 @@ export default function StudentDashboard() {
     return name.split(" ")[0] || "Student";
   }, [userDoc, profile, firebaseUser]);
 
-  const completedAttempts = useMemo(() => attempts.filter((a) => a.status === "submitted"), [attempts]);
-  const inProgressAttempt = useMemo(() => attempts.find((a) => a.status === "in-progress") || null, [attempts]);
+  const completedAttempts = useMemo(
+    () => attemptsWithRank.filter((a) => a.status === "completed"),
+    [attemptsWithRank]
+  );
+  const inProgressAttempt = useMemo(
+    () => attemptsWithRank.find((a) => a.status === "in-progress") || null,
+    [attemptsWithRank]
+  );
 
   // Metrics
   const avgScore = useMemo(() => {
     if (completedAttempts.length === 0) return 0;
-    const sum = completedAttempts.reduce((acc, a) => acc + a.accuracyPct, 0);
+    const sum = completedAttempts.reduce((acc, a) => acc + a.accuracy, 0);
     return Math.round(sum / completedAttempts.length);
   }, [completedAttempts]);
 
   const subjectPerformance = useMemo(() => {
-    // group attempts by subject and average accuracy
     const map: Record<string, { total: number; count: number }> = {};
     for (const a of completedAttempts) {
       const key = a.subject || "General Test";
       map[key] = map[key] || { total: 0, count: 0 };
-      map[key].total += a.accuracyPct;
+      map[key].total += a.accuracy;
       map[key].count += 1;
     }
 
@@ -207,7 +311,6 @@ export default function StudentDashboard() {
       score: Math.round(v.total / Math.max(1, v.count)),
     }));
 
-    // sort best first
     data.sort((x, y) => y.score - x.score);
     return data;
   }, [completedAttempts]);
@@ -218,63 +321,15 @@ export default function StudentDashboard() {
   }, [subjectPerformance]);
 
   const scoreTrend = useMemo(() => {
-    // last 8 completed attempts in chronological order
     const list = [...completedAttempts]
-      .sort((a, b) => (a.submittedAtMs || a.createdAtMs) - (b.submittedAtMs || b.createdAtMs))
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       .slice(-8);
 
     return list.map((a) => ({
-      date: formatDateLabel(a.submittedAtMs || a.createdAtMs),
-      score: a.accuracyPct,
+      date: formatDateLabel(new Date(a.createdAt).getTime()),
+      score: a.accuracy,
     }));
   }, [completedAttempts]);
-
-  // Rank (simple: compare total score among all submitted attempts for this educator)
-  // NOTE: This is “best-effort” rank using attempts collection.
-  // For true batch rank, we should build a leaderboard collection updated on submit.
-  const [rank, setRank] = useState<number | null>(null);
-  useEffect(() => {
-    if (!canLoad) return;
-
-    // lightweight rank: find top scores of latest attempts (not perfect but works)
-    const qTop = query(
-      collection(db, "attempts"),
-      where("educatorId", "==", educatorId!),
-      where("status", "==", "submitted"),
-      orderBy("score", "desc"),
-      limit(200)
-    );
-
-    const unsub = onSnapshot(
-      qTop,
-      (snap) => {
-        const scores: Array<{ studentId: string; score: number }> = snap.docs.map((d) => {
-          const a = d.data() as any;
-          return { studentId: String(a?.studentId || ""), score: safeNum(a?.score, 0) };
-        });
-
-        // compute best score per student
-        const best: Record<string, number> = {};
-        for (const s of scores) {
-          if (!s.studentId) continue;
-          best[s.studentId] = Math.max(best[s.studentId] || 0, s.score);
-        }
-
-        const sorted = Object.entries(best)
-          .sort((a, b) => b[1] - a[1])
-          .map(([studentId]) => studentId);
-
-        const idx = sorted.findIndex((id) => id === firebaseUser!.uid);
-        setRank(idx >= 0 ? idx + 1 : null);
-      },
-      (err) => {
-        console.error(err);
-        setRank(null);
-      }
-    );
-
-    return () => unsub();
-  }, [canLoad, educatorId, firebaseUser]);
 
   if (loading) {
     return <div className="text-center py-12 text-muted-foreground">Loading...</div>;
@@ -305,14 +360,12 @@ export default function StudentDashboard() {
           value={completedAttempts.length}
           icon={FileText}
           color="mint"
-          trend={{ value: Math.min(99, completedAttempts.length * 3), isPositive: true }}
         />
         <StudentMetricCard
           title="Avg Score"
           value={`${avgScore}%`}
           icon={Target}
           color="yellow"
-          trend={{ value: Math.min(99, Math.floor(avgScore / 10)), isPositive: true }}
         />
         <StudentMetricCard
           title="Best Subject"
@@ -324,7 +377,7 @@ export default function StudentDashboard() {
         <StudentMetricCard
           title="Current Rank"
           value={rank ? `#${rank}` : "—"}
-          subtitle="in your coaching"
+          subtitle={totalParticipants ? `out of ${totalParticipants}` : "in your coaching"}
           icon={TrendingUp}
           color="peach"
         />
@@ -399,4 +452,3 @@ export default function StudentDashboard() {
     </div>
   );
 }
-
