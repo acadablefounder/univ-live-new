@@ -140,7 +140,7 @@ export default function Signup() {
         });
         
         toast.success("Academy created!");
-        window.location.href = `http://${generatedSlug}.univ.live/dashboard`;
+        window.location.href = `http://${generatedSlug}.univ.live/educator`;
       }
 
     } catch (error: any) {

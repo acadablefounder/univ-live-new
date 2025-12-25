@@ -89,6 +89,7 @@ export default function AppRoutes() {
             }
           >
             <Route index element={<EducatorDashboard />} />
+            <Route path="dashboard" element={<EducatorDashboard />} />
             <Route path="learners" element={<Learners />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="access-codes" element={<AccessCodes />} />
@@ -122,6 +123,7 @@ export default function AppRoutes() {
             }
           >
             <Route index element={<EducatorDashboard />} />
+            <Route path="dashboard" element={<EducatorDashboard />} />
             <Route path="learners" element={<Learners />} />
             <Route path="test-series" element={<TestSeries />} />
             <Route path="access-codes" element={<AccessCodes />} />
