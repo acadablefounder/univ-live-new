@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ArrowRight, FileText, Star, Loader2, BookOpen } from "lucide-react";
+import { ArrowRight, FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,38 +25,46 @@ export default function Theme1CoursesPreview() {
   const [courses, setCourses] = useState<TestSeries[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // 1. Extract IDs to prevent infinite loops in useEffect
+  const educatorId = tenant?.educatorId;
+  const featuredIds = tenant?.websiteConfig?.featuredTestIds || [];
+  const uniqueIdString = featuredIds.join(",");
+
   useEffect(() => {
-    if (!tenant?.educatorId) return;
+    if (!educatorId) return;
 
     const fetchCourses = async () => {
+      setLoading(true);
       try {
         let q;
-        // Check if educator has selected specific tests in Website Settings
-        const featuredIds = tenant.websiteConfig?.featuredTestIds || [];
 
-        // CASE A: Educator has manually selected tests to show
+        // CASE A: Educator has manually selected tests
         if (featuredIds.length > 0) {
-          // Firestore 'in' query supports up to 10 items
           const safeIds = featuredIds.slice(0, 10); 
           q = query(
-            collection(db, "educators", tenant.educatorId, "my_tests"),
+            collection(db, "educators", educatorId, "my_tests"),
             where(documentId(), "in", safeIds)
           );
         } 
         // CASE B: No selection, show top 4 newest
         else {
           q = query(
-            collection(db, "educators", tenant.educatorId, "my_tests"),
+            collection(db, "educators", educatorId, "my_tests"),
             orderBy("createdAt", "desc"),
             limit(4)
           );
         }
 
         const snap = await getDocs(q);
-        const fetchedData = snap.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data
-        })) as TestSeries[];
+        
+        // --- FIX IS HERE ---
+        const fetchedData = snap.docs.map(doc => {
+          // We cast doc.data() 'as any' or 'as object' to fix the spread error
+          return {
+            id: doc.id,
+            ...(doc.data() as any) 
+          };
+        }) as TestSeries[];
 
         setCourses(fetchedData);
       } catch (error) {
@@ -67,7 +75,9 @@ export default function Theme1CoursesPreview() {
     };
 
     fetchCourses();
-  }, [tenant]);
+
+    // 2. Safe dependencies to prevent "Stuck Loading"
+  }, [educatorId, uniqueIdString]); 
 
   if (!tenant) return null;
   if (loading) return <div className="py-20 flex justify-center"><Loader2 className="animate-spin text-muted-foreground" /></div>;
