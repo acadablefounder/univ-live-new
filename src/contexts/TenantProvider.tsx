@@ -54,7 +54,7 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
           const d = snaps.docs[0].data() as any;
           setTenant({
             educatorId: snaps.docs[0].id,
-            tenantSlug: d.slug, 
+            tenantSlug: d.tenantSlug, 
             coachingName: d.coachingName,
             tagline: d.tagline,
             contact: d.contact,
