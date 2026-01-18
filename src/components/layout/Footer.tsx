@@ -120,3 +120,6 @@ export function Footer() {
     </footer>
   );
 }
+
+// ✅ add default export so `import Footer from ".../Footer"` works
+export default Footer;
