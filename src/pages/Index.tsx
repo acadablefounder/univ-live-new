@@ -1,14 +1,17 @@
 import { useTenant } from "@/contexts/TenantProvider";
 
 // Global homepage (existing UI – unchanged)
-import Navbar from "@/components/layout/Navbar";
-import Footer from "@/components/layout/Footer";
-import HeroSection from "@/components/home/HeroSection";
-import HowItWorksSection from "@/components/home/HowItWorksSection";
-import FeaturesSection from "@/components/home/FeaturesSection";
-import TestimonialsSection from "@/components/home/TestimonialsSection";
-import PricingPreview from "@/components/home/PricingPreview";
-import CTASection from "@/components/home/CTASection";
+import { Layout } from "@/components/layout/Layout";
+import { HeroSection } from "@/components/sections/HeroSection";
+import { DashboardPreview } from "@/components/sections/DashboardPreview";
+import { FeatureCards } from "@/components/sections/FeatureCards";
+import { StepsSection } from "@/components/sections/StepsSection";
+import { BenefitsSection } from "@/components/sections/BenefitsSection";
+import { AboutSection } from "@/components/sections/AboutSection";
+import { IntegrationsSection } from "@/components/sections/IntegrationsSection";
+import { TestimonialsSection } from "@/components/sections/TestimonialsSection";
+import { FAQSection } from "@/components/sections/FAQSection";
+import { CTASection } from "@/components/sections/CTASection";
 
 // Tenant website (theme)
 import Theme1Layout from "@/themes/coaching/theme1/Theme1Layout";
@@ -56,19 +59,18 @@ const Index = () => {
 
   // 🟢 GLOBAL HOMEPAGE (univ.live)
   return (
-    <div className="min-h-screen bg-background">
-      <Navbar />
-      <main>
-        <HeroSection />
-        <HowItWorksSection />
-        <FeaturesSection />
-        <FeaturesSection />
-        <TestimonialsSection />
-        <PricingPreview />
-        <CTASection />
-      </main>
-      <Footer />
-    </div>
+    <Layout>
+      <HeroSection />
+      <DashboardPreview />
+      <FeatureCards />
+      <StepsSection />
+      <BenefitsSection />
+      <AboutSection />
+      <IntegrationsSection />
+      <TestimonialsSection />
+      <FAQSection />
+      <CTASection />
+    </Layout>
   );
 };
 
