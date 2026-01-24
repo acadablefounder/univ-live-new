@@ -1,57 +1,48 @@
-import { Navigate, Outlet } from "react-router-dom";
+import React from "react";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
-import { useEffect } from "react";
 
 export default function StudentRoute() {
-  const { profile, loading: authLoading } = useAuth();
-  const { tenantSlug, isTenantDomain, loading: tenantLoading } = useTenant();
+  const { firebaseUser, profile, loading: authLoading } = useAuth();
+  const { isTenantDomain, tenantSlug, loading: tenantLoading } = useTenant();
+  const location = useLocation();
 
-  // 1. Wait for everything to load
+  // ✅ wait for both contexts
   if (authLoading || tenantLoading) {
     return (
-      <div className="h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="min-h-[60vh] flex items-center justify-center gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading…
       </div>
     );
   }
 
-  // 2. Not Logged In? -> Login Page
-  if (!profile) {
-    return <Navigate to="/login?role=student" replace />;
+  // Students must be on tenant domain
+  if (!isTenantDomain) {
+    return <Navigate to="/login?role=student" replace state={{ from: location.pathname }} />;
   }
 
-  // 3. Not a Student? -> Dashboard (or home)
-  if (profile.role !== "STUDENT") {
-    return <Navigate to="/dashboard" replace />;
+  if (!firebaseUser) {
+    return <Navigate to="/login?role=student" replace state={{ from: location.pathname }} />;
   }
 
-  // 4. Security Check: Are they enrolled in THIS tenant?
-  if (isTenantDomain) {
-    const enrolledList = profile.enrolledTenants || [];
-    
-    // Check match
-    const isEnrolled = enrolledList.includes(tenantSlug!) || profile.tenantSlug === tenantSlug;
-
-    if (!isEnrolled) {
-      // If not enrolled, kick them out to the HOME page of this tenant
-      return <RedirectToHomeWithError />;
-    }
+  const role = String(profile?.role || "STUDENT").toUpperCase();
+  if (role !== "STUDENT") {
+    return <Navigate to="/login?role=student" replace state={{ from: location.pathname }} />;
   }
 
-  // 5. Allowed
+  // Must be enrolled in this tenant
+  const enrolledTenants = Array.isArray(profile?.enrolledTenants)
+    ? profile!.enrolledTenants!
+    : typeof profile?.tenantSlug === "string"
+    ? [profile.tenantSlug]
+    : [];
+
+  if (!tenantSlug || !enrolledTenants.includes(tenantSlug)) {
+    return <Navigate to="/signup?role=student" replace state={{ from: location.pathname }} />;
+  }
+
   return <Outlet />;
-}
-
-// Small helper to show the error message after redirect
-function RedirectToHomeWithError() {
-  useEffect(() => {
-    setTimeout(() => {
-        toast.error("You are not enrolled in this coaching. Please Register first.");
-    }, 100);
-  }, []);
-  
-  return <Navigate to="/" replace />;
 }

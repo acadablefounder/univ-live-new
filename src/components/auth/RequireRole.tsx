@@ -1,35 +1,40 @@
-// src/components/auth/RequireRole.tsx
 import React from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { useAuth, type UserRole } from "@/contexts/AuthProvider";
+import { useAuth } from "@/contexts/AuthProvider";
+import type { UserRole } from "@/contexts/AuthProvider";
+import { Loader2 } from "lucide-react";
 
 type Props = {
-  allow: UserRole[];          // roles allowed to access
-  redirectTo?: string;        // where to send if not allowed
+  allow: UserRole[];
+  redirectTo?: string;
   children: React.ReactNode;
 };
 
 export default function RequireRole({ allow, redirectTo = "/login", children }: Props) {
-  const { loading, isAuthed, role } = useAuth();
+  const { firebaseUser, profile, loading } = useAuth();
   const location = useLocation();
 
+  // ✅ CRITICAL: don’t redirect while loading
   if (loading) {
     return (
-      <div className="min-h-[60vh] flex items-center justify-center">
-        <div className="text-sm text-muted-foreground">Loading...</div>
+      <div className="min-h-[60vh] flex items-center justify-center gap-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Loading…
       </div>
     );
   }
 
-  if (!isAuthed) {
-    return <Navigate to={redirectTo} state={{ from: location.pathname }} replace />;
+  if (!firebaseUser) {
+    return <Navigate to={redirectTo} replace state={{ from: location.pathname }} />;
   }
 
-  if (!role || !allow.includes(role)) {
-    // If logged in but wrong role, send to home (or you can show a 403 page later)
-    return <Navigate to="/" replace />;
+  const role = String(profile?.role || "STUDENT").toUpperCase() as UserRole;
+
+  // ✅ case-insensitive allow check
+  const allowed = allow.map((r) => String(r).toUpperCase());
+  if (!allowed.includes(role)) {
+    return <Navigate to={redirectTo} replace state={{ from: location.pathname }} />;
   }
 
   return <>{children}</>;
 }
-
