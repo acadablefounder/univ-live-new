@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { razorpayRequest } from "../_lib/razorpayRequest";
+import { razorpayRequest } from "../_lib/razorpayRequest.js";
 import { getAdmin } from "../_lib/firebaseAdmin.js"; 
 import { requireUser } from "../_lib/requireUser.js";
 
