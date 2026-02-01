@@ -1,5 +1,5 @@
 import type { VercelRequest } from "@vercel/node";
-import { getAdmin } from "./firebaseAdmin";
+import { getAdmin } from "./firebaseAdmin.js";
 
 export type AppRole = "ADMIN" | "EDUCATOR" | "STUDENT";
 
