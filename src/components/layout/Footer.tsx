@@ -23,7 +23,7 @@ const socialLinks = [
   { name: "Facebook", icon: Facebook, href: "#" },
 ];
 
-export const Footer = forwardRef<HTMLElement>((_, ref) => {
+const Footer = forwardRef<HTMLElement>((_, ref) => {
   return (
     <footer ref={ref} className="bg-foreground text-background relative overflow-hidden">
       {/* Large watermark text */}
@@ -126,3 +126,5 @@ export const Footer = forwardRef<HTMLElement>((_, ref) => {
 });
 
 Footer.displayName = "Footer";
+
+export default Footer;
