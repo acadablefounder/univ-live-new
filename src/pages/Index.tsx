@@ -1,4 +1,4 @@
-import { Layout } from "@/components/layout/Layout";
+import  Layout  from "@/components/layout/Layout";
 import { HeroSection } from "@/components/sections/HeroSection";
 import { StepsSection } from "@/components/sections/StepsSection";
 import { BenefitsSection } from "@/components/sections/BenefitsSection";
