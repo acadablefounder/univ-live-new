@@ -14,7 +14,7 @@ const navLinks = [
   { name: "Contact Us", path: "/contact" },
 ];
 
-export function Navbar() {
+export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
