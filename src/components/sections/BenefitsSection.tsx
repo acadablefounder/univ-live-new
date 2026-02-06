@@ -39,6 +39,13 @@ const benefits = [
     gradient: "from-pink-500/20 to-orange-500/20",
     iconColor: "text-pink-600",
   },
+  {
+    icon: FileText,
+    title: "Real Exam–Like Test Experience",
+    description: "Feels exactly like the actual CUET exam with authentic interface, timer, and navigation.",
+    gradient: "from-orange-500/20 to-red-500/20",
+    iconColor: "text-orange-600",
+  },
 ];
 
 export function BenefitsSection() {

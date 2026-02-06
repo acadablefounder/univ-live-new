@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import univLogo from "@/assets/univ-logo.png";
+import { SHOW_ANNOUNCEMENT } from "./AnnouncementBar";
 
 const navLinks = [
   { name: "Home", path: "/" },
@@ -13,7 +14,7 @@ const navLinks = [
   { name: "Contact Us", path: "/contact" },
 ];
 
-export default function Navbar() {
+export function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
@@ -33,7 +34,8 @@ export default function Navbar() {
   return (
     <header
       className={cn(
-        "fixed top-0 left-0 right-0 z-50 transition-all duration-300",
+        "fixed left-0 right-0 z-50 transition-all duration-300",
+        SHOW_ANNOUNCEMENT ? "top-[40px]" : "top-0",
         isScrolled ? "bg-background/80 backdrop-blur-xl shadow-soft border-b border-border/50" : "bg-transparent"
       )}
     >
