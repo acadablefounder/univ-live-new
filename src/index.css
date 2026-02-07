@@ -162,6 +162,11 @@
     background: var(--gradient-primary);
   }
 
+  /* Backward-compatible utility used throughout the app */
+  .gradient-bg {
+    @apply bg-gradient-bg;
+  }
+
   .gradient-hero {
     background: var(--gradient-hero);
   }

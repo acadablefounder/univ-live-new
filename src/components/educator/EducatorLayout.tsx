@@ -40,8 +40,6 @@ const sidebarItems = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/educator/dashboard" },
   { icon: Users, label: "Learners", href: "/educator/learners" },
   { icon: FileText, label: "Test Series", href: "/educator/test-series" },
-  { icon: Download, label: "Imported Tests", href: "/educator/imported-tests" },
-  { icon: Search, label: "Explore Tests", href: "/educator/explore-tests" },
   { icon: Key, label: "Access Codes", href: "/educator/access-codes" },
   { icon: BarChart3, label: "Analytics", href: "/educator/analytics" },
   { icon: MessageSquare, label: "Messages", href: "/educator/messages", badge: 3 },

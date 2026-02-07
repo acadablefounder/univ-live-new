@@ -18,6 +18,9 @@ export default function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
+  
+  // Keep header transparent only on the public home page; use solid background for app routes
+  const isHomeRoute = location.pathname === "/";
 
   useEffect(() => {
     const handleScroll = () => {
@@ -36,7 +39,11 @@ export default function Navbar() {
       className={cn(
         "fixed left-0 right-0 z-50 transition-all duration-300",
         SHOW_ANNOUNCEMENT ? "top-[40px]" : "top-0",
-        isScrolled ? "bg-background/80 backdrop-blur-xl shadow-soft border-b border-border/50" : "bg-transparent"
+        isScrolled
+          ? "bg-background/80 backdrop-blur-xl shadow-soft border-b border-border/50"
+          : isHomeRoute
+          ? "bg-transparent"
+          : "bg-background"
       )}
     >
       <nav className="container-main flex items-center justify-between py-4">
