@@ -101,8 +101,25 @@ export default function Login() {
         return;
       }
 
+      const tenantSlugDb = data?.tenantSlug;
+      if (!tenantSlugDb) {
+        toast.error("Educator account misconfigured (missing tenant slug).");
+        await auth.signOut();
+        return;
+      }
+
       toast.success("Logged in!");
-      nav("/educator");
+
+      // ✅ NEW: Redirect to subdomain
+      if (window.location.hostname === "localhost") {
+        // For local development: append ?tenant parameter
+        nav(`/educator?tenant=${tenantSlugDb}`);
+      } else {
+        // For production: redirect to subdomain
+        const protocol = window.location.protocol; // https:
+        const educatorUrl = `${protocol}//${tenantSlugDb}.univ.live/educator`;
+        window.location.href = educatorUrl;
+      }
     } catch (error: any) {
       console.error(error);
       let msg = "Failed to login";
