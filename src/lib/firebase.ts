@@ -1,6 +1,6 @@
 // src/lib/firebase.ts
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, setPersistence, browserLocalPersistence } from "firebase/auth";
+import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
@@ -23,12 +23,6 @@ export const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfi
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
-
-// Configure persistence to use browserLocalPersistence
-// We supplement this with domain-level cookies in authPersistence.ts
-setPersistence(auth, browserLocalPersistence).catch((err) => {
-  console.warn("Failed to set Firebase persistence:", err);
-});
 
 // Optional analytics (safe)
 export async function initAnalytics() {

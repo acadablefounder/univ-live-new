@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { getTenantSlugFromHostname } from "@/lib/tenant";
 import { db } from "@/lib/firebase";
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
+import { useAuth } from "@/contexts/AuthProvider";
 
 export type TenantProfile = {
   educatorId: string;
@@ -23,16 +24,31 @@ type TenantContextValue = {
 const TenantContext = createContext<TenantContextValue | null>(null);
 
 export function TenantProvider({ children }: { children: React.ReactNode }) {
+  const { profile } = useAuth(); // Get logged-in user's profile
   const [tenantSlug, setTenantSlug] = useState<string | null>(null);
   const [tenant, setTenant] = useState<TenantProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isTenantDomain, setIsTenantDomain] = useState(false);
 
   useEffect(() => {
-    const slug = getTenantSlugFromHostname(window.location.hostname);
-    setTenantSlug(slug);
-    setIsTenantDomain(Boolean(slug));
-  }, []);
+    // 1. First, try to get tenant slug from hostname (subdomain)
+    const slugFromHostname = getTenantSlugFromHostname(window.location.hostname);
+    
+    if (slugFromHostname) {
+      // On tenant subdomain (e.g., coaching.univ.live)
+      setTenantSlug(slugFromHostname);
+      setIsTenantDomain(true);
+    } else if (profile?.tenantSlug) {
+      // Fallback: if on main domain but educator is logged in, use their tenantSlug
+      // This allows educator dashboard to access tenant data from main domain
+      setTenantSlug(profile.tenantSlug);
+      setIsTenantDomain(false);
+    } else {
+      // No tenant context available
+      setTenantSlug(null);
+      setIsTenantDomain(false);
+    }
+  }, [profile?.tenantSlug]);
 
   useEffect(() => {
     let alive = true;

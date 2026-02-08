@@ -110,17 +110,8 @@ export default function Login() {
 
       toast.success("Logged in!");
 
-      // ✅ NEW: Redirect to subdomain
-      if (window.location.hostname === "localhost") {
-        // For local development: append ?tenant parameter
-        nav(`/educator?tenant=${tenantSlugDb}`);
-      } else {
-        // For production: redirect to subdomain
-        const protocol = window.location.protocol; // https:
-        const appDomain = import.meta.env.VITE_APP_DOMAIN || "univ.live";
-        const educatorUrl = `${protocol}//${tenantSlugDb}.${appDomain}/educator`;
-        window.location.href = educatorUrl;
-      }
+      // ✅ Keep educator on main domain - TenantProvider will use their tenantSlug from profile
+      nav("/educator");
     } catch (error: any) {
       console.error(error);
       let msg = "Failed to login";
