@@ -58,6 +58,7 @@ type QuestionDoc = {
   explanation?: string;
   positiveMarks?: number;
   negativeMarks?: number;
+  marks?: number;
 };
 
 type TestDoc = {
@@ -156,12 +157,16 @@ export default function StudentResults() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false);
 
   const [attempt, setAttempt] = useState<AttemptDoc | null>(null);
   const [sectionScores, setSectionScores] = useState<SectionScore[]>([]);
   const [computedScore, setComputedScore] = useState<number | null>(null);
   const [computedMaxScore, setComputedMaxScore] = useState<number | null>(null);
   const [computedAccuracyPct, setComputedAccuracyPct] = useState<number | null>(null);
+  
+  // Store questions for AI analysis
+  const [questionsData, setQuestionsData] = useState<{ id: string; data: QuestionDoc }[]>([]);
 
   const rank = attempt?.rank ?? 0;
   const totalParticipants = attempt?.totalParticipants ?? 0;
@@ -171,6 +176,89 @@ export default function StudentResults() {
     const top = Math.round((rank / totalParticipants) * 100);
     return `Top ${top}%`;
   }, [rank, totalParticipants]);
+
+  async function triggerAIAnalysis(
+    questions: { id: string; data: QuestionDoc }[],
+    responses: Record<string, AttemptResponse>,
+    testTitle: string,
+    subject: string,
+    score: number,
+    maxScore: number,
+    accuracy: number
+  ) {
+    if (!attemptId) return;
+
+    setAiAnalysisLoading(true);
+    try {
+      // Prepare the data for the API
+      const userResponses = questions.map((q) => {
+        const resp = responses[q.id];
+        const userAnswer = resp?.answer ?? null;
+        const isCorrect = userAnswer !== null && userAnswer !== undefined;
+        return {
+          questionId: q.id,
+          userAnswer: userAnswer ? String(userAnswer) : null,
+          isCorrect,
+          marks: safeNumber((q.data as any).marks ?? q.data.positiveMarks, 4),
+        };
+      });
+
+      const analysisRequest = {
+        questions: questions.map((q) => ({
+          id: q.id,
+          text: q.data.text || "",
+          type: q.data.type || "mcq",
+          options: q.data.options,
+          correctOptionIndex: q.data.correctOptionIndex,
+          correctAnswer: q.data.correctAnswer,
+          explanation: q.data.explanation,
+          section: q.data.sectionId || "General",
+          marks: safeNumber((q.data as any).marks ?? q.data.positiveMarks, 4),
+        })),
+        responses: userResponses,
+        testTitle,
+        subject,
+        totalScore: score,
+        maxScore,
+        accuracy,
+      };
+
+      const response = await fetch("/api/ai/analyze-performance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(analysisRequest),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to get AI analysis");
+      }
+
+      const analysis = await response.json();
+
+      // Update attempt with the analysis
+      setAttempt((prev) =>
+        prev
+          ? {
+              ...prev,
+              aiReviewStatus: "completed",
+              aiReview: analysis,
+            }
+          : null
+      );
+    } catch (err) {
+      console.error("Error getting AI analysis:", err);
+      setAttempt((prev) =>
+        prev
+          ? {
+              ...prev,
+              aiReviewStatus: "failed",
+            }
+          : null
+      );
+    } finally {
+      setAiAnalysisLoading(false);
+    }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -245,6 +333,9 @@ export default function StudentResults() {
 
         if (!mounted) return;
 
+        // Store questions data for AI analysis
+        setQuestionsData(qs);
+
         // prefer stored values when present, otherwise computed
         setAttempt({
           ...a,
@@ -259,6 +350,11 @@ export default function StudentResults() {
 
         const storedAcc = typeof a.accuracy === "number" ? normalizeAccuracyPercent(a.accuracy) : null;
         setComputedAccuracyPct(storedAcc ?? derived.accuracyPct);
+
+        // Trigger AI analysis if not already completed
+        if ((!a.aiReviewStatus || a.aiReviewStatus === "queued") && !a.aiReview) {
+          triggerAIAnalysis(qs, resp, a.testTitle || testData.title || "Untitled Test", a.subject || testData.subject || "General", derived.score, derived.maxScore, derived.accuracyPct);
+        }
       } catch (e: any) {
         console.error(e);
         if (!mounted) return;
