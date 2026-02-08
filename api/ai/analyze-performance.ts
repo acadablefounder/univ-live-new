@@ -75,9 +75,11 @@ export default async function handler(
     }
 
     const groqApiKey = process.env.GROQ_API_KEY;
+    const isDev = process.env.NODE_ENV !== "production";
     if (!groqApiKey) {
       console.error("GROQ_API_KEY not configured");
-      return res.status(500).json({ error: "API configuration error" });
+      const msg = isDev ? "GROQ_API_KEY not configured on server. Add it to Vercel environment variables or .env.local for local dev." : "API configuration error";
+      return res.status(500).json({ error: msg });
     }
 
     // Build the prompt for Groq
@@ -138,7 +140,8 @@ Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
     if (!groqResponse.ok) {
       const error = await groqResponse.text();
       console.error("Groq API error:", error);
-      return res.status(500).json({ error: "Failed to analyze performance" });
+      const msg = isDev ? `Groq API error: ${error}` : "Failed to analyze performance";
+      return res.status(500).json({ error: msg });
     }
 
     const data = await groqResponse.json();
@@ -156,14 +159,16 @@ Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
       const jsonString = jsonMatch[1] || content;
       analysis = JSON.parse(jsonString.trim());
     } catch (parseError) {
-      console.error("Failed to parse AI response:", content);
-      return res.status(500).json({ error: "Failed to parse AI analysis" });
+      console.error("Failed to parse AI response:", content, parseError);
+      const msg = isDev ? `Failed to parse AI analysis: ${String(parseError)} -- content: ${String(content).slice(0,200)}` : "Failed to parse AI analysis";
+      return res.status(500).json({ error: msg });
     }
 
     return res.status(200).json(analysis);
   } catch (error) {
     console.error("Error in analyze-performance:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    const isDev = process.env.NODE_ENV !== "production";
+    return res.status(500).json({ error: isDev ? String(error) : "Internal server error" });
   }
 }
 
