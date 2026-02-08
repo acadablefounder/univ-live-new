@@ -146,9 +146,10 @@ export default function StudentTests() {
   }, [tests, search]);
 
   // Unlock codes (kept, but only reachable if allowed)
-  const unlockWithCode = async (code: string) => {
+  // Accepts optional expectedTestId to ensure student is unlocking the intended test
+  const unlockWithCode = async (code: string, expectedTestId?: string) => {
     if (!firebaseUser?.uid || !educatorId) return;
-    const c = code.trim().toUpperCase();
+    const c = String(code || "").trim().toUpperCase();
     if (!c) return;
 
     try {
@@ -160,6 +161,28 @@ export default function StudentTests() {
         const data = codeSnap.data() as any;
         const testId = String(data.testSeriesId || data.testId || "");
         if (!testId) throw new Error("Code not linked to any test");
+
+        // If caller expected a specific test, ensure code maps to it
+        if (expectedTestId && expectedTestId !== testId) throw new Error("Code is not valid for this test");
+
+        // Check expiry
+        const expiresAt = data.expiresAt;
+        const expiresMs =
+          typeof expiresAt?.toMillis === "function"
+            ? expiresAt.toMillis()
+            : typeof expiresAt?.seconds === "number"
+            ? expiresAt.seconds * 1000
+            : null;
+        if (typeof expiresMs === "number" && Date.now() > expiresMs) throw new Error("Code has expired");
+
+        // Check max uses
+        const max = Number(data.maxUses || 0);
+        const used = Number(data.usesUsed || 0);
+        if (max > 0 && used >= max) throw new Error("Code has been exhausted");
+
+        // increment usesUsed
+        const newUsed = used + 1;
+        tx.update(codeRef, { usesUsed: newUsed });
 
         const unlockRef = doc(collection(db, "testUnlocks"));
         tx.set(unlockRef, {
@@ -283,8 +306,14 @@ export default function StudentTests() {
             <TestCard
               key={t.id}
               test={{ ...t, isLocked: locked }}
+              onView={() => nav(`/student/tests/${t.id}`)}
               onStart={() => nav(`/student/tests/${t.id}`)}
-              onUnlock={(code: string) => unlockWithCode(code)}
+              onUnlock={(testId: string) => {
+                const entered = window.prompt("Enter access code to unlock this test:");
+                if (entered && entered.trim()) {
+                  unlockWithCode(entered.trim(), testId);
+                }
+              }}
             />
           );
         })}
