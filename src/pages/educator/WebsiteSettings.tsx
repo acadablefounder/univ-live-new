@@ -91,7 +91,8 @@ export default function WebsiteSettings() {
   const [coachingName, setCoachingName] = useState("");
   const [tagline, setTagline] = useState("");
   const [heroImage, setHeroImage] = useState("");
-  
+  const [themeId, setThemeId] = useState<"theme1" | "theme2" | "theme3">("theme1");
+
   const [stats, setStats] = useState<StatItem[]>([]);
   const [achievements, setAchievements] = useState<AchievementItem[]>([]);
   const [faculty, setFaculty] = useState<FacultyItem[]>([]);
@@ -177,6 +178,7 @@ export default function WebsiteSettings() {
           const data = educatorSnap.data().websiteConfig || {};
           
           // Load existing settings
+          setThemeId((data.themeId as any) || "theme1");
           setCoachingName(data.coachingName || "");
           setTagline(data.tagline || "");
           setHeroImage(data.heroImage || "");
@@ -225,16 +227,18 @@ export default function WebsiteSettings() {
       
       // Construct the config object with ALL fields
       const websiteConfig = {
-        coachingName,
-        tagline,
-        heroImage,
-        stats,
-        achievements,
-        faculty,
-        testimonials,
-        featuredTestIds, // Includes the new selection
-        updatedAt: new Date()
-      };
+  themeId,
+  coachingName,
+  tagline,
+  heroImage,
+  stats,
+  achievements,
+  faculty,
+  testimonials,
+  featuredTestIds,
+  updatedAt: new Date()
+};
+
 
       // Clean undefined values to prevent Firebase errors
       Object.keys(websiteConfig).forEach(key => 
@@ -427,6 +431,59 @@ export default function WebsiteSettings() {
 
         {/* --- 1. General Tab --- */}
         <TabsContent value="general" className="space-y-6">
+        
+        <Card>
+  <CardHeader>
+    <CardTitle className="flex items-center gap-2">
+      <Layout className="h-5 w-5" />
+      Website Theme
+    </CardTitle>
+    <CardDescription>
+      Choose how your public home page looks. Login + student dashboard stays the same.
+    </CardDescription>
+  </CardHeader>
+
+  <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    {/* Theme 1 */}
+    <button
+      type="button"
+      onClick={() => setThemeId("theme1")}
+      className={`text-left rounded-2xl border p-4 transition ${
+        themeId === "theme1" ? "ring-2 ring-foreground" : "hover:bg-muted/40"
+      }`}
+    >
+      <div className="font-semibold">Theme 1</div>
+      <div className="text-xs text-muted-foreground mt-1">Current classic theme</div>
+      <div className="mt-3 text-xs text-muted-foreground">Best for: clean coaching landing</div>
+    </button>
+
+    {/* Theme 2 */}
+    <button
+      type="button"
+      onClick={() => setThemeId("theme2")}
+      className={`text-left rounded-2xl border p-4 transition ${
+        themeId === "theme2" ? "ring-2 ring-foreground" : "hover:bg-muted/40"
+      }`}
+    >
+      <div className="font-semibold">Theme 2</div>
+      <div className="text-xs text-muted-foreground mt-1">Modern landing (your inspiration)</div>
+      <div className="mt-3 text-xs text-muted-foreground">Best for: premium creator look</div>
+    </button>
+
+    {/* Theme 3 (disabled for now) */}
+    <button
+      type="button"
+      disabled
+      className="text-left rounded-2xl border p-4 opacity-60 cursor-not-allowed"
+    >
+      <div className="font-semibold">Theme 3</div>
+      <div className="text-xs text-muted-foreground mt-1">Coming soon</div>
+      <div className="mt-3 text-xs text-muted-foreground">Will be added next</div>
+    </button>
+  </CardContent>
+</Card>
+
+        
            <Card>
              <CardHeader>
                <CardTitle>Hero Section</CardTitle>

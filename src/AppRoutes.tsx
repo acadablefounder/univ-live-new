@@ -7,7 +7,7 @@ import RequireRole from "@/components/auth/RequireRole";
 import StudentRoute from "@/components/routes/StudentRoute"; // <--- IMPORT THIS
 
 // Tenant / Public Pages edit uh
-import TenantHome from "@/themes/coaching/theme1/TenantHome"; 
+import TenantHome from "@/themes/coaching/TenantHome";
 import TenantCourses from "@/themes/coaching/theme1/TenantCourses";
 import Login from "@/pages/Login";
 import Signup from "@/pages/Signup";
