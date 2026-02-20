@@ -109,6 +109,19 @@ function normalizeQuestionDoc(id: string, data: any): TestQuestion {
   };
 }
 
+function pruneUndefined<T extends Record<string, any>>(obj: T): T {
+  Object.keys(obj).forEach((k) => {
+    const v = (obj as any)[k];
+    if (v === undefined) {
+      delete (obj as any)[k];
+    } else if (v && typeof v === "object" && !Array.isArray(v)) {
+      pruneUndefined(v);
+    }
+  });
+  return obj;
+}
+
+
 async function pickImageFile(): Promise<File | null> {
   return await new Promise((resolve) => {
     const input = document.createElement("input");
@@ -228,18 +241,22 @@ export default function TestSeries() {
 
     try {
       // Copy metadata to educators/{uid}/my_tests
-      const meta: any = {
+      const meta: any = pruneUndefined({
         // whitelisted fields (keeps compatibility + avoids copying weird transient fields)
         title: bankTest.title ?? "",
         description: bankTest.description ?? "",
         subject: bankTest.subject ?? "",
         level: bankTest.level ?? "",
-        durationMinutes: Number(bankTest.durationMinutes ?? 0),
+        durationMinutes: Number(bankTest.durationMinutes ?? bankTest.duration ?? 0),
 
         sections: bankTest.sections ?? [],
         instructions: bankTest.instructions ?? "",
-        positiveMarks: bankTest.positiveMarks ?? undefined,
-        negativeMarks: bankTest.negativeMarks ?? undefined,
+
+        // marks config (omit if missing - Firestore rejects undefined)
+        positiveMarks:
+          bankTest.positiveMarks != null ? Number(bankTest.positiveMarks) : undefined,
+        negativeMarks:
+          bankTest.negativeMarks != null ? Number(bankTest.negativeMarks) : undefined,
 
         // provenance
         source: "imported",
@@ -249,7 +266,7 @@ export default function TestSeries() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: currentUser.uid,
-      };
+      });
 
       const newTestRef = await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), meta);
 
