@@ -98,7 +98,9 @@ export default function TenantHomeTheme2() {
 
   const coachingName = config.coachingName || tenant.coachingName || "Your Institute";
   const tagline = config.tagline || tenant.tagline || "Learn smarter. Score higher.";
-  const heroImage: string | undefined = config.heroImage;
+  // Put your default fallback image link here
+const defaultHeroImage = "https://plus.unsplash.com/premium_photo-1683887034491-f58b4c4fca72?q=80&w=869&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D";
+const finalHeroImage = config.heroImage || tenant.heroImage || defaultHeroImage;
 
   const stats: StatItem[] = Array.isArray(config.stats) ? config.stats : [];
   const achievements: AchievementItem[] = Array.isArray(config.achievements) ? config.achievements : [];
@@ -353,11 +355,7 @@ export default function TenantHomeTheme2() {
               transition={{ duration: 0.8, delay: 0.3 }}
               className="lg:absolute lg:top-[-450px] lg:-left-4 w-[280px] h-[360px] lg:w-[320px] lg:h-[440px] rounded-sm overflow-hidden shadow-2xl mx-auto lg:mx-0 z-0 hidden lg:block"
             >
-              {heroImage ? (
-                <img src={heroImage} alt="Students" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full bg-stone-200" />
-              )}
+              <img src={finalHeroImage} alt="Students" className="w-full h-full object-cover" />
             </motion.div>
 
              {/* Right floating image (Placeholder context) */}
@@ -367,9 +365,11 @@ export default function TenantHomeTheme2() {
               transition={{ duration: 0.8, delay: 0.4 }}
               className="lg:absolute lg:top-[-320px] lg:-right-4 w-[280px] h-[360px] lg:w-[320px] lg:h-[400px] rounded-sm overflow-hidden shadow-2xl mx-auto mt-8 lg:mt-0 lg:mx-0 z-0 hidden lg:block"
             >
-               <div className="w-full h-full bg-stone-300 object-cover flex items-center justify-center text-stone-400">
-                  <FileText className="w-12 h-12 opacity-50" />
-               </div>
+               <img 
+		  src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?q=80&w=871&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" 
+		  alt="Hero Decoration" 
+		  className="w-full h-full object-cover" 
+		/>
             </motion.div>
           </div>
 
@@ -398,18 +398,18 @@ export default function TenantHomeTheme2() {
 
           <div className="mt-20 grid md:grid-cols-2 gap-8 items-end">
             <div className="aspect-[4/5] md:aspect-square w-full max-w-sm overflow-hidden rounded-sm bg-stone-100">
-               {achievements[0]?.icon ? (
-                 <div className="w-full h-full flex items-center justify-center bg-stone-200 text-stone-400"><Star className="w-20 h-20 opacity-20"/></div>
-               ) : (
-                 <div className="w-full h-full bg-stone-200" />
-               )}
+               <img 
+		  src="https://images.unsplash.com/photo-1523240795612-9a054b0db644?q=80&w=870&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" 
+		  alt="About Highlight" 
+		  className="w-full h-full object-cover" 
+		/>
             </div>
             <div className="aspect-[16/10] w-full overflow-hidden rounded-sm bg-stone-100">
-               {heroImage ? (
-                 <img src={heroImage} className="w-full h-full object-cover" alt="Campus" />
-               ) : (
-                 <div className="w-full h-full bg-stone-300" />
-               )}
+               <img 
+		  src="https://images.unsplash.com/photo-1565689157206-0fddef7589a2?q=80&w=870&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" 
+		  alt="Campus" 
+		  className="w-full h-full object-cover" 
+		/>
             </div>
           </div>
         </div>
@@ -572,7 +572,11 @@ export default function TenantHomeTheme2() {
                   <div className="aspect-[3/4] overflow-hidden rounded-sm bg-stone-100 mb-4 relative">
                      {/* Placeholder for achievement image */}
                      <div className="absolute inset-0 bg-gradient-to-t from-stone-900/60 to-transparent z-10" />
-                     <div className="w-full h-full bg-stone-200" />
+                     <img 
+			  src="https://plus.unsplash.com/premium_photo-1770480460854-b1170b7b282a?q=80&w=895&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" 
+			  alt="Main Highlight" 
+			  className="w-full h-full object-cover" 
+			/>
                      <div className="absolute bottom-6 left-6 z-20 pr-6">
                         <h3 className="text-2xl font-medium text-white leading-tight">{achievements[0].title}</h3>
                         <p className="text-white/80 mt-2 line-clamp-2 text-sm">{achievements[0].description}</p>
@@ -592,8 +596,11 @@ export default function TenantHomeTheme2() {
                  <div key={`${a.title}-${idx}`} className="flex flex-col group cursor-pointer">
                    <div className="aspect-video overflow-hidden rounded-sm bg-stone-100 mb-4 relative">
                       {/* Using generic placeholders for achievements lacking images to match Image 5 style */}
-                      <div className="w-full h-full bg-stone-200 transition-transform duration-700 group-hover:scale-105" />
-                   </div>
+                      <img 
+			  src="https://plus.unsplash.com/premium_photo-1713229181330-1d1671608945?q=80&w=862&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D" 
+			  alt="Secondary Highlight" 
+			  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
+			/>
                    <span className="text-xs uppercase tracking-wider text-stone-500 mb-2 font-medium">Highlight</span>
                    <h3 className="text-xl font-medium text-stone-900 mb-2">{a.title}</h3>
                    <p className="text-stone-600 font-light line-clamp-2">{a.description}</p>
