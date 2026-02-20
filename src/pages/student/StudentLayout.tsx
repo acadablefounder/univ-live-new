@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import logo from "@/assets/logo.png";
+import univLogo from "@/assets/univ-logo-1.png";
 
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
@@ -239,7 +240,7 @@ export default function StudentLayout() {
           {/* Logo */}
           <div className="h-16 flex items-center justify-between px-4 border-b border-border shrink-0">
             <Link to="/" className="flex items-center gap-2">
-              <img src={logo} alt="UNIV.LIVE" className="h-8 w-auto" />
+              <img src={univLogo} alt="UNIV.LIVE" className="h-8 w-auto" />
               <span className="font-display font-bold text-lg">
                 <span className="gradient-text">UNIV</span>
                 <span className="text-foreground">.LIVE</span>

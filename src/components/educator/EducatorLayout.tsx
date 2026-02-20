@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import logo from "@/assets/logo.png";
+import univLogo from "@/assets/univ-logo-1.png";
 
 const sidebarItems = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/educator/dashboard" },
@@ -81,7 +82,7 @@ export default function EducatorLayout() {
           {/* Logo */}
           <div className="h-16 flex items-center justify-between px-4 border-b border-border">
             <Link to="/" className="flex items-center gap-2">
-              <img src={logo} alt="UNIV.LIVE" className="h-8 w-auto" />
+              <img src={univLogo} alt="UNIV.LIVE" className="h-8 w-auto" />
               <span className="font-display font-bold text-lg">
                 <span className="gradient-text">UNIV</span>
                 <span className="text-foreground">.LIVE</span>

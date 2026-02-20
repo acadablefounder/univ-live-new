@@ -21,7 +21,7 @@ export function HeroSection() {
             transition={{ duration: 0.6 }}
           >
             {/* Trust badge */}
-            <motion.div
+            {/* <motion.div
               className="inline-flex items-center gap-3 bg-gradient-to-r from-primary/10 to-accent/10 border border-primary/20 rounded-full px-5 py-2.5 mb-8"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -41,7 +41,7 @@ export function HeroSection() {
               <span className="text-sm font-semibold text-foreground">
                 Trusted by 100+ educators
               </span>
-            </motion.div>
+            </motion.div> */}
 
             {/* Headline */}
             <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-foreground mb-6 text-balance leading-[1.1]">

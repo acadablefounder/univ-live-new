@@ -11,7 +11,7 @@ const plans = [
     features: [
       "5-day free trial",
       "No restriction on subject selection",
-      "10 full-length CBT tests per subject",
+      "1 full-length CBT tests per subject",
       "AI-powered advanced analytics",
       "Upload your own content (test series, questions & question banks)",
       "AI-powered solutions",
@@ -28,9 +28,10 @@ const plans = [
     features: [
       "Everything in Essential, plus:",
       "5-day free trial",
+      "1 full-length CBT tests per subject",
       "Priority call & chat support",
       "Personalized preference sheet",
-      "1-on-1 mentorship with top university & college students",
+      "Mentorship sessions with top university & college students",
       "Exclusive WhatsApp teacher community (fast CUET updates & discussions)",
       "Complete post-CUET student support (results, counselling & admissions guidance)",
     ],
