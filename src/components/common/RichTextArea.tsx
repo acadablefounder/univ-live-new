@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { ImagePlus, Loader2 } from "lucide-react";
-import { uploadImageToMediaKit } from "@/lib/mediakit";
+import { uploadToImageKit } from "@/lib/imagekitUpload";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
@@ -46,10 +46,7 @@ export function RichTextarea({
     if (!ref.current) return;
     setUploading(true);
     try {
-      const res = await uploadImageToMediaKit(blob, {
-        fileName,
-        folder: `/${folder}`,
-      });
+        const res = await uploadToImageKit(blob, fileName, `/${folder}`);
 
       const tag = `\n<img src="${res.url}" alt="" />\n`;
       const next = insertAtCursor(ref.current, tag, value);

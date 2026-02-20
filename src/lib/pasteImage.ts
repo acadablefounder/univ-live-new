@@ -1,4 +1,4 @@
-import { uploadToMediaKit } from "@/lib/mediakit";
+import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 export function insertAtCursor(
   value: string,
@@ -34,10 +34,8 @@ export async function tryHandleImagePaste(
 
   opts.onUploading?.(true);
   try {
-    const up = await uploadToMediaKit(blob, {
-      folder: opts.folder || "/question-bank",
-      fileName: `pasted_${Date.now()}.png`,
-    });
+    const fileName = `pasted_${Date.now()}.png`;
+    const up = await uploadToImageKit(blob, fileName, opts.folder || "/question-bank");
     const tpl =
       opts.insertTemplate ||
       ((url) => `\n<img src="${url}" alt="image" />\n`);
