@@ -57,6 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 type Difficulty = "easy" | "medium" | "hard";
 
@@ -172,59 +173,36 @@ function normalizeTags(v: any): string[] {
   return [];
 }
 
-function findFirstUrl(obj: any): string | null {
-  if (!obj || typeof obj !== "object") return null;
-  const candidates = [
-    obj.url,
-    obj.fileUrl,
-    obj.secure_url,
-    obj.data?.url,
-    obj.result?.url,
-    obj.data?.fileUrl,
-  ];
-  for (const c of candidates) {
-    if (typeof c === "string" && c.startsWith("http")) return c;
-  }
-  return null;
-}
 
-async function fileToDataUrl(file: File) {
-  const buf = await file.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return `data:${file.type};base64,${btoa(binary)}`;
-}
 
-async function uploadImageToMediakitOrStorage(file: File): Promise<string> {
+function safeBaseNameFromSrc(src: string) {
+  if (!src) return "";
+  const cleaned = src.split("?")[0].split("#")[0];
+  const base = cleaned.split("/").pop() || cleaned;
   try {
-    const dataUrl = await fileToDataUrl(file);
-    const res = await fetch("/api/mediakit/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: file.name,
-        contentType: file.type || "image/png",
-        dataUrl,
-      }),
-    });
-    if (res.ok) {
-      const out = await res.json();
-      const url = findFirstUrl(out);
-      if (url) return url;
-    }
+    return decodeURIComponent(base);
   } catch {
-    // fallback
+    return base;
+  }
+}
+
+async function uploadImageToImageKitOrStorage(file: File): Promise<string> {
+  // Primary: ImageKit
+  try {
+    const { url } = await uploadToImageKit(file, file.name, "/question-bank");
+    if (url) return url;
+  } catch {
+    // fallback below
   }
 
+  // Fallback: Firebase Storage (keeps editor usable even if ImageKit is down)
   const path = `question_bank/uploads/${Date.now()}_${Math.random().toString(16).slice(2)}_${file.name}`;
   const sref = ref(storage, path);
   await uploadBytes(sref, file);
   return await getDownloadURL(sref);
 }
+
+
 
 // ContentEditable editor with paste-image support
 function RichHtmlEditor({
@@ -288,7 +266,7 @@ function RichHtmlEditor({
     setBusy(true);
     try {
       for (const f of list) {
-        const url = await uploadImageToMediakitOrStorage(f);
+        const url = await uploadImageToImageKitOrStorage(f);
         insertHtmlAtCursor(`<img src="${url}" alt="image" />`);
       }
       toast({ title: "Image added", description: "Image uploaded and inserted." });
@@ -597,26 +575,43 @@ export default function QuestionBank() {
     return { raw, imageMap };
   };
 
-  const replaceImagesInHtml = async (html: string, imageMap: Map<string, Blob>) => {
-    if (!html) return "";
-    const imgSrcRe = /<img[^>]*\ssrc=["']([^"']+)["'][^>]*>/gi;
+  const replaceImagesInHtml = async (
+	  html: string,
+	  imageMap: Map<string, Blob>,
+	  uploadedCache: Map<string, string>
+	) => {
+	  if (!html) return "";
+	  const imgSrcRe = /<img[^>]*\ssrc=["']([^"']+)["'][^>]*>/gi;
 
-    let out = html;
-    const matches = Array.from(html.matchAll(imgSrcRe));
-    for (const m of matches) {
-      const src = m[1] || "";
-      const base = src.split("/").pop() || src;
+	  let out = html;
+	  const matches = Array.from(html.matchAll(imgSrcRe));
+	  for (const m of matches) {
+	    const src = m[1] || "";
 
-      const blob = imageMap.get(base);
-      if (!blob) continue;
+	    // already hosted / already embedded — keep it
+	    if (src.startsWith("http") || src.startsWith("data:")) continue;
 
-      const file = new File([blob], base, { type: blob.type || "image/png" });
-      const url = await uploadImageToMediakitOrStorage(file);
+	    const base = safeBaseNameFromSrc(src);
+	    if (!base) continue;
 
-      out = out.replaceAll(src, url);
-    }
-    return out;
-  };
+	    // reuse already-uploaded URL for same file name
+	    const cached = uploadedCache.get(base);
+	    if (cached) {
+	      out = out.replaceAll(src, cached);
+	      continue;
+	    }
+
+	    const blob = imageMap.get(base);
+	    if (!blob) continue;
+
+	    const file = new File([blob], base, { type: blob.type || "image/png" });
+	    const url = await uploadImageToImageKitOrStorage(file);
+
+	    uploadedCache.set(base, url);
+	    out = out.replaceAll(src, url);
+	  }
+	  return out;
+	};
 
   const handleImport = async () => {
     if (!importFile) {
@@ -647,17 +642,25 @@ export default function QuestionBank() {
         const marks = typeof q.mark === "number" ? q.mark : 4;
         const negativeMarks = typeof q.penalty === "number" ? q.penalty : -1;
 
-        const questionHtml = await replaceImagesInHtml(String(q.text || ""), imageMap);
+        const uploadedCache = new Map<string, string>();
+
+const questionHtml = await replaceImagesInHtml(String(q.text || ""), imageMap, uploadedCache);
+
         const opts = Array.isArray(q.options?.option) ? q.options!.option! : [];
         const optionsHtml = await Promise.all(
-          opts.slice(0, 4).map(async (o) => replaceImagesInHtml(String(o?.content || ""), imageMap))
-        );
+  opts.slice(0, 4).map(async (o) =>
+    replaceImagesInHtml(String(o?.content || ""), imageMap, uploadedCache)
+  )
+);
 
         const corr = q.answer?.correctOptions?.option?.[0];
         const correctIdx = typeof corr === "number" ? Math.max(0, Math.min(3, corr - 1)) : 0;
 
-        const explanationHtml = await replaceImagesInHtml(String(q.answer?.solution?.text || ""), imageMap);
-
+        const explanationHtml = await replaceImagesInHtml(
+  String(q.answer?.solution?.text || ""),
+  imageMap,
+  uploadedCache
+);
         const payload: Partial<QBQuestion> = {
           subject,
           topic,
