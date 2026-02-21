@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 const plans = [
   {
     name: "Essential Plan",
+    originalPrice: 241,
     price: 169,
     description: "Best for small coaching centers starting with CBT",
     features: [
@@ -23,6 +24,7 @@ const plans = [
   },
   {
     name: "Growth Plan",
+    originalPrice: 284,
     price: 199,
     description: "Best for growing coaching centers",
     features: [
@@ -98,10 +100,25 @@ export function PricingSection() {
 
               <div className="mb-8">
                 <h3 className="text-xl font-semibold mb-2">{plan.name}</h3>
-                <div className="flex items-baseline gap-1 mb-3">
-                  <span className="text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">₹{plan.price}</span>
-                  <span className="text-muted-foreground font-medium">/ Student</span>
+                
+                {/* Updated Price Display with Discount */}
+                <div className="flex flex-col gap-1 mb-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xl font-bold text-muted-foreground line-through decoration-2">
+                      ₹{plan.originalPrice}
+                    </span>
+                    <span className="text-xs font-bold text-green-700 bg-green-500/20 px-2.5 py-0.5 rounded-full dark:text-green-400 dark:bg-green-500/10">
+                      30% OFF
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-5xl lg:text-6xl font-extrabold bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                      ₹{plan.price}
+                    </span>
+                    <span className="text-muted-foreground font-medium">/ Student</span>
+                  </div>
                 </div>
+
                 <p className="text-muted-foreground">{plan.description}</p>
               </div>
 
