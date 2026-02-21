@@ -13,7 +13,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 
-export default function HelpDesk() {
+export default function Messages() {
   const [uid, setUid] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
 
