@@ -2,11 +2,6 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getAdmin } from "../_lib/firebaseAdmin.js";
 import { requireUser } from "../_lib/requireUser.js";
 
-function isSubscriptionUsable(sub: any): boolean {
-  const status = String(sub?.status || "").toLowerCase();
-  return status === "active" || status === "authenticated";
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
@@ -20,14 +15,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const admin = getAdmin();
     const db = admin.firestore();
 
-    const subSnap = await db.doc(`educators/${educatorId}/billing/subscription`).get();
-    const sub = subSnap.data() || {};
-    if (!isSubscriptionUsable(sub)) {
-      return res.status(403).json({ error: "Subscription not active/trial. Buy a plan first." });
+    // NEW SYSTEM: seatLimit is granted by ADMIN on educators/{educatorId}.seatLimit
+    const educatorSnap = await db.doc(`educators/${educatorId}`).get();
+    const seatLimit = Math.max(0, Number(educatorSnap.data()?.seatLimit || 0));
+    if (seatLimit <= 0) {
+      return res.status(403).json({
+        error: "No seats assigned to your coaching yet. Contact Univ.Live support/admin to get seats.",
+      });
     }
-
-    const seatLimit = Math.max(0, Number(sub.quantity || 0));
-    if (seatLimit <= 0) return res.status(400).json({ error: "Seat limit is 0. Update quantity in Billing." });
 
     // must exist in learners list
     const studentSnap = await db.doc(`educators/${educatorId}/students/${studentId}`).get();
@@ -56,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (used >= seatLimit) {
-      return res.status(400).json({ error: "Seat limit reached. Increase quantity or revoke another seat." });
+      return res.status(400).json({ error: "Seat limit reached. Contact sales/admin to increase seats." });
     }
 
     await seatRef.set(
@@ -72,7 +67,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({ ok: true });
   } catch (e: any) {
     console.error(e);
-    return res.status(500).json({ error: e?.message || "Server error" });
+    const msg = String(e?.message || "Server error");
+    if (msg === "Forbidden") return res.status(403).json({ error: "Forbidden" });
+    return res.status(500).json({ error: msg });
   }
 }
-

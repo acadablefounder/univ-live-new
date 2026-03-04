@@ -20,32 +20,13 @@ import {
 } from "firebase/firestore";
 import { TestCard } from "@/components/student/TestCard";
 
-function isSubscriptionUsable(sub: any): boolean {
-  const status = String(sub?.status || "").toLowerCase();
-  if (status === "active" || status === "authenticated") return true;
-
-  // trial: created allowed only until startAt
-  if (status === "created") {
-    const startAt = sub?.startAt;
-    const startMs =
-      typeof startAt?.toMillis === "function"
-        ? startAt.toMillis()
-        : typeof startAt?.seconds === "number"
-        ? startAt.seconds * 1000
-        : null;
-    if (typeof startMs === "number" && Date.now() < startMs) return true;
-  }
-  return false;
-}
-
 export default function StudentTests() {
   const nav = useNavigate();
   const { firebaseUser, role, enrolledTenants, loading: authLoading } = useAuth();
   const { tenant, tenantSlug, isTenantDomain, loading: tenantLoading } = useTenant();
 
   const educatorId = tenant?.educatorId || "";
-  const [sub, setSub] = useState<any>(null);
-  const [seatActive, setSeatActive] = useState(false);
+    const [seatActive, setSeatActive] = useState(false);
   const [billingLoading, setBillingLoading] = useState(true);
 
   const [tests, setTests] = useState<any[]>([]);
@@ -82,10 +63,6 @@ export default function StudentTests() {
 
     setBillingLoading(true);
 
-    const unsubSub = onSnapshot(doc(db, "educators", educatorId, "billing", "subscription"), (snap) => {
-      setSub(snap.exists() ? snap.data() : null);
-    });
-
     const unsubSeat = onSnapshot(doc(db, "educators", educatorId, "billingSeats", firebaseUser.uid), (snap) => {
       const s = String((snap.data() as any)?.status || "").toLowerCase();
       setSeatActive(s === "active");
@@ -93,13 +70,12 @@ export default function StudentTests() {
     });
 
     return () => {
-      unsubSub();
       unsubSeat();
     };
   }, [firebaseUser?.uid, educatorId]);
 
   const enrolledHere = tenantSlug ? enrolledTenants.includes(tenantSlug) : false;
-  const allowed = enrolledHere && isSubscriptionUsable(sub) && seatActive;
+  const allowed = enrolledHere && seatActive;
 
   // Load tests (only if allowed)
   useEffect(() => {
@@ -255,20 +231,6 @@ export default function StudentTests() {
         </div>
         <p className="text-sm text-muted-foreground">
           Your educator has not granted you a seat yet. Ask your educator to grant a seat from the Learners panel.
-        </p>
-      </div>
-    );
-  }
-
-  if (!isSubscriptionUsable(sub)) {
-    return (
-      <div className="p-6 space-y-3">
-        <div className="flex items-center gap-2">
-          <ShieldOff className="h-5 w-5" />
-          <h1 className="text-xl font-semibold">Subscription not active</h1>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Your educator’s subscription is not active/trial. Tests will unlock once they activate billing.
         </p>
       </div>
     );

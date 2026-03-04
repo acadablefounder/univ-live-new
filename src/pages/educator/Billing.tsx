@@ -1,276 +1,347 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Loader2 } from "lucide-react";
-import { doc, onSnapshot, collection, onSnapshot as onSnapshotCol } from "firebase/firestore";
+import { Loader2, MessageCircle } from "lucide-react";
+import { collection, doc, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthProvider";
+import { toast } from "sonner";
 
-declare global {
-  interface Window {
-    Razorpay?: any;
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+type TxRow = {
+  id: string;
+  transactionId?: string;
+  previousSeatLimit?: number;
+  newSeatLimit?: number;
+  delta?: number;
+  note?: string | null;
+  usedSeatsAtUpdate?: number;
+  updatedAt?: any;
+  updatedByEmail?: string | null;
+};
+
+function fmtTs(ts: any) {
+  if (!ts) return "-";
+  try {
+    const ms = typeof ts?.toMillis === "function" ? ts.toMillis() : ts?.seconds ? ts.seconds * 1000 : null;
+    if (!ms) return "-";
+    return new Date(ms).toLocaleString();
+  } catch {
+    return "-";
   }
 }
 
-// Helper to load Razorpay SDK
-function loadRazorpayScript(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (window.Razorpay) return resolve(true);
-    const s = document.createElement("script");
-    s.src = "https://checkout.razorpay.com/v1/checkout.js";
-    s.onload = () => resolve(true);
-    s.onerror = () => resolve(false);
-    document.body.appendChild(s);
-  });
+function getWhatsAppNumber(): string {
+  // Use Vite env if set, else fallback
+  const fromEnv = (import.meta as any)?.env?.VITE_SALES_WHATSAPP_NUMBER;
+  const n = String(fromEnv || "").replace(/\D/g, "");
+  return n || "919999999999"; // CHANGE this fallback to your real sales number
+}
+
+function waLink(number: string, message: string) {
+  const text = encodeURIComponent(message);
+  return `https://wa.me/${number}?text=${text}`;
 }
 
 export default function Billing() {
-  const nav = useNavigate();
   const { firebaseUser, role, loading: authLoading } = useAuth();
   const educatorId = firebaseUser?.uid || "";
 
-  const [sub, setSub] = useState<any>(null);
-  const [seatLimit, setSeatLimit] = useState<number>(10);
-  const [busy, setBusy] = useState(false);
-  const [usedSeats, setUsedSeats] = useState(0);
+  const [educator, setEducator] = useState<any>(null);
+  const [usedSeats, setUsedSeats] = useState<number>(0);
+  const [tx, setTx] = useState<TxRow[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // 1. Redirect if not Educator
-  useEffect(() => {
-    if (!authLoading && role && role !== "EDUCATOR" && role !== "ADMIN") nav("/login?role=educator");
-  }, [authLoading, role, nav]);
+  const [newSeatPopupOpen, setNewSeatPopupOpen] = useState(false);
+  const [popupTxId, setPopupTxId] = useState<string>("");
+  const [popupSeatLimit, setPopupSeatLimit] = useState<number>(0);
 
-  // 2. Listen to Subscription & Seat Data
+  const seatLimit = Math.max(0, Number(educator?.seatLimit || 0));
+  const available = Math.max(0, seatLimit - usedSeats);
+
+  const lastTxId = String(educator?.lastSeatTransactionId || "");
+  const lastUpdatedAt = educator?.seatUpdatedAt || educator?.lastSeatTransactionAt;
+
   useEffect(() => {
     if (!educatorId) return;
-    
-    // Listen to subscription status
-    const unsub = onSnapshot(doc(db, "educators", educatorId, "billing", "subscription"), (snap) => {
-      const d = snap.exists() ? snap.data() : null;
-      setSub(d);
-      if (d?.quantity) setSeatLimit(Number(d.quantity));
+
+    setLoading(true);
+
+    const unEdu = onSnapshot(doc(db, "educators", educatorId), (snap) => {
+      setEducator(snap.exists() ? snap.data() : null);
+      setLoading(false);
     });
 
-    // Listen to active seat count
-    const unsubSeats = onSnapshotCol(collection(db, "educators", educatorId, "billingSeats"), (snap) => {
-      let c = 0;
-      snap.docs.forEach((d) => {
-        const s = String((d.data() as any)?.status || "").toLowerCase();
-        if (s === "active") c++;
-      });
-      setUsedSeats(c);
-    });
+    const unSeats = onSnapshot(
+      query(collection(db, "educators", educatorId, "billingSeats"), where("status", "==", "active")),
+      (snap) => setUsedSeats(snap.size)
+    );
+
+    const unTx = onSnapshot(
+      query(collection(db, "educators", educatorId, "seatTransactions"), orderBy("updatedAt", "desc")),
+      (snap) => {
+        setTx(snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+      }
+    );
 
     return () => {
-      unsub();
-      unsubSeats();
+      unEdu();
+      unSeats();
+      unTx();
     };
   }, [educatorId]);
 
-  // Derived state
-  const status = String(sub?.status || "none");
-  const subId = String(sub?.razorpaySubscriptionId || "");
-  const planKey = String(sub?.planKey || "");
-  const limit = Math.max(0, Number(sub?.quantity || seatLimit || 0));
+  // Popup when admin updates seats
+  useEffect(() => {
+    if (!educatorId) return;
+    if (!lastTxId) return;
 
-  const isTrialOrActive = useMemo(() => {
-    const st = status.toLowerCase();
-    if (st === "active" || st === "authenticated") return true;
-    if (st === "created") {
-      const startAt = sub?.startAt;
-      const startMs =
-        typeof startAt?.toMillis === "function"
-          ? startAt.toMillis()
-          : typeof startAt?.seconds === "number"
-          ? startAt.seconds * 1000
-          : null;
-      if (typeof startMs === "number" && Date.now() < startMs) return true;
+    const key = `seen_seat_tx_${educatorId}`;
+    const seen = localStorage.getItem(key) || "";
+
+    if (seen !== lastTxId) {
+      setPopupTxId(lastTxId);
+      setPopupSeatLimit(seatLimit);
+      setNewSeatPopupOpen(true);
+      localStorage.setItem(key, lastTxId);
     }
-    return false;
-  }, [status, sub]);
+  }, [educatorId, lastTxId, seatLimit]);
 
-  // Helper for API calls
-  async function postWithToken(path: string, body: any) {
-    if (!firebaseUser) throw new Error("Not logged in");
-    const token = await firebaseUser.getIdToken();
-    const res = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || "Request failed");
-    return data;
+  const openWhatsApp = (plan: string) => {
+    const number = getWhatsAppNumber();
+    const name = String(educator?.coachingName || educator?.name || educator?.displayName || "");
+    const email = String(firebaseUser?.email || "");
+    const msg =
+      `Hi Univ.Live Sales,\n\n` +
+      `I want to discuss the ${plan} plan / seat upgrade.\n` +
+      `Coaching: ${name || "-"}\n` +
+      `Educator UID: ${educatorId}\n` +
+      `Email: ${email || "-"}\n` +
+      `Current Seats: ${seatLimit} (Used: ${usedSeats})\n\n` +
+      `Please guide me for increasing seats and payment details.`;
+    window.open(waLink(number, msg), "_blank");
+  };
+
+  const plans = useMemo(
+    () => [
+      {
+        name: "Essential",
+        price: "₹169/seat",
+        badge: "",
+        features: [
+          "Includes: 5-Day Free Trial",
+          "No restriction on subject selection",
+          "10 CBT tests per subject (expert-created)",
+          "AI-powered advanced analytics",
+          "Upload your own content (test series, question bank)",
+          "AI-powered solutions",
+          "Full student performance analytics",
+          "Email support",
+        ],
+      },
+      {
+        name: "Growth",
+        price: "₹199/seat",
+        badge: "Most Popular",
+        features: [
+          "Everything in Essential",
+          "Priority call & chat support",
+          "Personalised Preference Sheet",
+          "1-on-1 mentorship sessions",
+          "Exclusive WhatsApp teacher community",
+          "Complete post-CUET support",
+        ],
+      },
+      {
+        name: "Executive",
+        price: "Custom pricing",
+        badge: "",
+        features: ["Custom plan for large institutions", "Bulk pricing discounts", "Dedicated account manager"],
+      },
+    ],
+    []
+  );
+
+  if (authLoading || loading) {
+    return (
+      <div className="p-6 flex items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin" />
+      </div>
+    );
   }
 
-  // --- CORE CHECKOUT LOGIC ---
-  const startCheckout = async (planKey: string) => {
-    setBusy(true);
-    try {
-      // A. Load Razorpay Script FIRST
-      const isLoaded = await loadRazorpayScript();
-      if (!isLoaded) throw new Error("Razorpay SDK failed to load. Check your internet.");
-
-      // B. Create Subscription on Backend
-      const data = await postWithToken("/api/billing/create-subscription", { 
-        planKey, 
-        quantity: seatLimit 
-      });
-
-      // C. Open Razorpay Payment Popup
-      const options = {
-        key: data.keyId,
-        subscription_id: data.subscriptionId,
-        name: "Univ.Live",
-        description: `${planKey} Plan Subscription`,
-        
-        // D. Handle Success
-        handler: async function (response: any) {
-          try {
-            // Call Verification API
-            await postWithToken("/api/billing/verify-payment", {
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_subscription_id: response.razorpay_subscription_id,
-                razorpay_signature: response.razorpay_signature
-            });
-            
-            toast.success("Payment verified! Plan activated.");
-            window.location.reload(); 
-          } catch (err) {
-            console.error(err);
-            toast.error("Payment successful, but verification failed.");
-          }
-        },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.open();
-
-    } catch (e: any) {
-      console.error(e);
-      toast.error(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const updateQuantity = async () => {
-    setBusy(true);
-    try {
-      await postWithToken("/api/billing/update-quantity", { quantity: Math.max(1, Math.floor(seatLimit || 1)) });
-      toast.success("Seat limit updated");
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to update quantity");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (authLoading || !role) {
+  if (!firebaseUser || role !== "EDUCATOR") {
     return (
-      <div className="p-6 flex items-center gap-2 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+      <div className="p-6">
+        <p className="text-muted-foreground">You must be logged in as an Educator to access this page.</p>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold">Billing</h1>
-        <p className="text-sm text-muted-foreground">
-          Status: <b>{status}</b> {isTrialOrActive ? <span className="text-green-600">(usable)</span> : <span className="text-red-600">(not usable)</span>}
-          <br />
-          Seats used: <b>{usedSeats}</b> / <b>{limit}</b>
-          <br />
-          Plan: <b>{planKey || "—"}</b>
-          <br />
-          Subscription ID: <span className="font-mono text-xs">{subId || "—"}</span>
-        </p>
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold">Billing & Plan</h1>
+          <p className="text-sm text-muted-foreground">
+            Seats are assigned by Univ.Live Admin. To increase seats, contact Sales/Support.
+          </p>
+        </div>
+
+        <Button onClick={() => openWhatsApp("Seat Upgrade")} className="gap-2">
+          <MessageCircle className="h-4 w-4" />
+          Contact Sales on WhatsApp
+        </Button>
       </div>
 
-      <div className="border rounded-lg p-4 space-y-3">
-        <div className="font-semibold">Seat Limit</div>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Input
-            type="number"
-            min={1}
-            value={seatLimit}
-            onChange={(e) => setSeatLimit(Number(e.target.value))}
-            className="sm:max-w-xs"
-          />
-          <Button disabled={busy || !subId} onClick={updateQuantity}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Update Seat Limit
-          </Button>
-        </div>
-        {!subId && <div className="text-sm text-muted-foreground">Buy a plan first to enable quantity updates.</div>}
+      <div className="grid lg:grid-cols-3 gap-6">
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              Assigned Seats
+              {seatLimit > 0 ? <Badge variant="secondary">Active</Badge> : <Badge variant="destructive">Not Assigned</Badge>}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Total</span>
+              <span className="text-xl font-bold">{seatLimit}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Used</span>
+              <span className="text-xl font-bold">{usedSeats}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Available</span>
+              <span className="text-xl font-bold">{available}</span>
+            </div>
+
+            <div className="pt-2 text-sm text-muted-foreground space-y-1">
+              <div>
+                Last Tx ID: <span className="font-mono text-foreground">{lastTxId || "-"}</span>
+              </div>
+              <div>Last Update: {fmtTs(lastUpdatedAt)}</div>
+            </div>
+
+            <div className="pt-2">
+              <Button variant="outline" className="w-full" onClick={() => openWhatsApp("Seat Upgrade")}>
+                Request More Seats
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Seat Transaction History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Transaction ID</TableHead>
+                    <TableHead className="text-right">Seats</TableHead>
+                    <TableHead className="text-right">Δ</TableHead>
+                    <TableHead>Updated By</TableHead>
+                    <TableHead>Note</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tx.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        No transactions yet.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    tx.slice(0, 30).map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell>{fmtTs(r.updatedAt)}</TableCell>
+                        <TableCell className="font-mono">{r.transactionId || "-"}</TableCell>
+                        <TableCell className="text-right">{Number(r.newSeatLimit ?? 0)}</TableCell>
+                        <TableCell className="text-right">{Number(r.delta ?? 0)}</TableCell>
+                        <TableCell className="text-sm">{r.updatedByEmail || "-"}</TableCell>
+                        <TableCell className="text-sm">{r.note || "-"}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-3">
-        {/* ESSENTIAL PLAN */}
-        <div className="border rounded-xl p-6 flex flex-col gap-4 shadow-sm hover:shadow-md transition-shadow">
-          <div>
-            <h3 className="text-xl font-bold">Essential</h3>
-            <div className="text-3xl font-bold mt-2">₹169<span className="text-sm font-normal text-muted-foreground">/seat</span></div>
-            <p className="text-sm text-green-600 font-medium mt-1">Includes 5-Day Free Trial</p>
-          </div>
-          <ul className="text-sm space-y-2 text-muted-foreground flex-1">
-            <li>✓ No restriction on subject selection</li>
-            <li>✓ 10 CBT tests per subject</li>
-            <li>✓ AI-powered advanced analytics</li>
-            <li>✓ Upload your own content</li>
-            <li>✓ Email support</li>
-          </ul>
-          <Button className="w-full" disabled={busy} onClick={() => startCheckout("ESSENTIAL")}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Start Essential Trial
-          </Button>
-        </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Plans</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Plans are shown for reference. To purchase or upgrade, contact the Sales team on WhatsApp.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-3 gap-6">
+            {plans.map((p) => (
+              <div
+                key={p.name}
+                className={`rounded-2xl border p-5 bg-card shadow-sm ${
+                  p.badge ? "border-primary ring-2 ring-primary/20" : "border-border"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold">{p.name}</h3>
+                  {p.badge ? <Badge>{p.badge}</Badge> : null}
+                </div>
+                <div className="text-2xl font-bold mt-2">{p.price}</div>
+                <ul className="mt-4 space-y-2 text-sm text-muted-foreground">
+                  {p.features.map((f) => (
+                    <li key={f}>• {f}</li>
+                  ))}
+                </ul>
 
-        {/* GROWTH PLAN */}
-        <div className="border border-primary/50 rounded-xl p-6 flex flex-col gap-4 shadow-md bg-primary/5 relative">
-          <div className="absolute top-0 right-0 bg-primary text-primary-foreground text-xs px-2 py-1 rounded-bl-lg font-medium">
-            MOST POPULAR
+                <Button onClick={() => openWhatsApp(p.name)} className="w-full mt-5 gap-2">
+                  <MessageCircle className="h-4 w-4" />
+                  Contact Sales
+                </Button>
+              </div>
+            ))}
           </div>
-          <div>
-            <h3 className="text-xl font-bold">Growth</h3>
-            <div className="text-3xl font-bold mt-2">₹199<span className="text-sm font-normal text-muted-foreground">/seat</span></div>
-            <p className="text-sm text-green-600 font-medium mt-1">Includes 5-Day Free Trial</p>
-          </div>
-          <ul className="text-sm space-y-2 text-muted-foreground flex-1">
-            <li className="font-medium text-foreground">Everything in Essential, PLUS:</li>
-            <li>✓ Priority call & chat support</li>
-            <li>✓ Personalised Preference Sheet</li>
-            <li>✓ 1-on-1 mentorship sessions</li>
-            <li>✓ Exclusive WhatsApp teacher community</li>
-            <li>✓ Complete post-CUET support</li>
-          </ul>
-          <Button className="w-full" disabled={busy} onClick={() => startCheckout("GROWTH")}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-            Start Growth Trial
-          </Button>
-        </div>
+        </CardContent>
+      </Card>
 
-        {/* EXECUTIVE PLAN */}
-        <div className="border rounded-xl p-6 flex flex-col gap-4 shadow-sm opacity-80">
-          <div>
-            <h3 className="text-xl font-bold">Executive</h3>
-            <div className="text-xl font-bold mt-2">Custom Pricing</div>
-            <p className="text-sm text-muted-foreground mt-1">For large institutions</p>
+      <Dialog open={newSeatPopupOpen} onOpenChange={setNewSeatPopupOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Seats Updated</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              Your total seats have been updated by Univ.Live Admin.
+            </p>
+
+            <div className="rounded-xl border p-4 bg-muted/30 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">New Total Seats</span>
+                <span className="text-lg font-bold">{popupSeatLimit}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Transaction ID</span>
+                <span className="font-mono">{popupTxId || "-"}</span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <Button onClick={() => setNewSeatPopupOpen(false)}>OK</Button>
+            </div>
           </div>
-          <ul className="text-sm space-y-2 text-muted-foreground flex-1">
-            <li>✓ Custom Integrations</li>
-            <li>✓ White-labeling options</li>
-            <li>✓ Dedicated Account Manager</li>
-            <li>✓ Bulk pricing discounts</li>
-          </ul>
-          <Button variant="outline" className="w-full" onClick={() => window.open("mailto:sales@univ.live")}>
-            Contact Sales
-          </Button>
-        </div>
-      </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

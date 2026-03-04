@@ -19,12 +19,6 @@ import HowItWorks from "@/pages/HowItWorks";
 import Pricing from "@/pages/Pricing";
 import Contact from "@/pages/Contact";
 import Features from "@/pages/Features";
-import About from "@/pages/About";
-import Privacy from "@/pages/Privacy";
-import Terms from "@/pages/Terms";
-import TenantPrivacy from "@/pages/tenant/PrivacyPolicyTenant";
-import TenantTerms from "@/pages/tenant/TermsOfUseTenant";
-
 
 import AdminTestManager from "./pages/AdminTestManager";
 
@@ -35,6 +29,7 @@ import AdminTestBank from "@/pages/admin/TestBank";
 import AdminTestForm from "@/pages/admin/TestForm";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminQuestionBank from "@/pages/admin/QuestionBank";
+import AdminSeatManagement from "@/pages/admin/SeatManagement";
 
 // Educator Dashboard
 import EducatorLayout from "@/components/educator/EducatorLayout";
@@ -78,11 +73,6 @@ export default function AppRoutes() {
           <Route path="/courses" element={<TenantCourses />} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/privacy" element={<Privacy />} />
-          <Route path="/terms" element={<Terms />} />
-          <Route path="/privacy-policy" element={<TenantPrivacy />} />
-          <Route path="/terms-of-use" element={<TenantTerms />} />
 
           {/* --- PROTECTED STUDENT ROUTES --- */}
           {/* We replace 'RequireRole' with 'StudentRoute' here */}
@@ -158,6 +148,7 @@ export default function AppRoutes() {
           <Route path="tests/edit/:id" element={<AdminTestForm />} />
           <Route path="questions/:testId" element={<AdminQuestions />} />
           <Route path="question-bank" element={<AdminQuestionBank />} />
+          <Route path="seat-management" element={<AdminSeatManagement />} />
         </Route>
 
           {/* Main Platform Educator Dashboard */}

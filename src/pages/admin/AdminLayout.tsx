@@ -13,6 +13,7 @@ import {
   Sun,
   Moon,
   Shield,
+  CreditCard,
   ChevronLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ const sidebarItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/admin" },
   { icon: BookOpen, label: "Test Bank", path: "/admin/tests" },
   { icon: Users, label: "Educators", path: "/admin/educators" },
+  { icon: CreditCard, label: "Seat Management", path: "/admin/seat-management" },
   { icon: GraduationCap, label: "Students", path: "/admin/students" },
   { icon: BarChart3, label: "Attempts", path: "/admin/attempts" },
   { icon: MessageSquare, label: "Support", path: "/admin/support" },

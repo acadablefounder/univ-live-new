@@ -16,22 +16,6 @@ type Learner = {
   joinedAt?: any;
 };
 
-function isSubscriptionUsable(sub: any): boolean {
-  const status = String(sub?.status || "").toLowerCase();
-  if (status === "active" || status === "authenticated") return true;
-  if (status === "created") {
-    const startAt = sub?.startAt;
-    const startMs =
-      typeof startAt?.toMillis === "function"
-        ? startAt.toMillis()
-        : typeof startAt?.seconds === "number"
-        ? startAt.seconds * 1000
-        : null;
-    if (typeof startMs === "number" && Date.now() < startMs) return true;
-  }
-  return false;
-}
-
 export default function Learners() {
   const nav = useNavigate();
   const { firebaseUser, role, loading: authLoading } = useAuth();
@@ -39,7 +23,7 @@ export default function Learners() {
 
   const [learners, setLearners] = useState<Learner[]>([]);
   const [seatMap, setSeatMap] = useState<Record<string, boolean>>({});
-  const [sub, setSub] = useState<any>(null);
+  const [educator, setEducator] = useState<any>(null);
   const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -66,20 +50,20 @@ export default function Learners() {
       setSeatMap(map);
     });
 
-    const unsubSub = onSnapshot(doc(db, "educators", educatorId, "billing", "subscription"), (snap) => {
-      setSub(snap.exists() ? snap.data() : null);
+    const unsubEdu = onSnapshot(doc(db, "educators", educatorId), (snap) => {
+      setEducator(snap.exists() ? snap.data() : null);
     });
 
     return () => {
       unsubL();
       unsubSeats();
-      unsubSub();
+      unsubEdu();
     };
   }, [educatorId, refreshTick]);
 
-  const seatLimit = Math.max(0, Number(sub?.quantity || 0));
+  const seatLimit = Math.max(0, Number(educator?.seatLimit || 0));
   const usedSeats = useMemo(() => Object.values(seatMap).filter(Boolean).length, [seatMap]);
-  const canAssign = isSubscriptionUsable(sub) && seatLimit > 0;
+  const canAssign = seatLimit > 0 && usedSeats < seatLimit;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -148,7 +132,6 @@ export default function Learners() {
           <h1 className="text-2xl font-bold">Learners</h1>
           <p className="text-sm text-muted-foreground">
             Seats used: <b>{usedSeats}</b> / <b>{seatLimit}</b>{" "}
-            {!isSubscriptionUsable(sub) ? <span className="text-red-500">(subscription inactive)</span> : null}
           </p>
         </div>
         <Button variant="outline" onClick={() => setRefreshTick((x) => x + 1)}>
@@ -211,9 +194,9 @@ export default function Learners() {
         })}
       </div>
 
-      {!isSubscriptionUsable(sub) && (
+      {seatLimit <= 0 && (
         <div className="text-sm text-muted-foreground border rounded-lg p-4">
-          Your subscription is not active/trial. Go to <b>Billing</b> to buy a plan, then you can grant seats.
+          No seats are assigned to your coaching yet. Please contact Univ.Live admin/sales to get seats assigned.
         </div>
       )}
     </div>
