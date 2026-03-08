@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Save,
   Loader2,
@@ -61,6 +61,7 @@ import {
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { useTenant } from "@/contexts/TenantProvider";
+import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 // --- Types ---
 type StatItem = { label: string; value: string; icon: string };
@@ -108,6 +109,13 @@ export default function WebsiteSettings() {
   const [coachingName, setCoachingName] = useState("");
   const [tagline, setTagline] = useState("");
   const [heroImage, setHeroImage] = useState("");
+
+  const [logoUrl, setLogoUrl] = useState("");
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingHero, setUploadingHero] = useState(false);
+
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const heroInputRef = useRef<HTMLInputElement | null>(null);
 
   // NEW: Theme selection
   const [themeId, setThemeId] = useState<"theme1" | "theme2" | "theme3">("theme1");
@@ -203,6 +211,7 @@ export default function WebsiteSettings() {
           setCoachingName(data.coachingName || "");
           setTagline(data.tagline || "");
           setHeroImage(data.heroImage || "");
+          setLogoUrl(data.logoUrl || "");
           setStats(data.stats || []);
           setAchievements(data.achievements || []);
           setFaculty(data.faculty || []);
@@ -242,7 +251,50 @@ export default function WebsiteSettings() {
     fetchData();
   }, [firebaseUser]);
 
-  // --- 2. Save Data ---
+  
+  // --- Image Upload Helpers (ImageKit) ---
+  const uploadWebsiteImage = async (file: File, kind: "logo" | "hero") => {
+    if (!firebaseUser) throw new Error("Not logged in");
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const ts = Date.now();
+    const folder = `/website-assets/${firebaseUser.uid}`;
+    const res = await uploadToImageKit(file, `${kind}-${ts}-${safeName}`, folder);
+    return res.url;
+  };
+
+  const handleLogoFilePick = async (file?: File | null) => {
+    if (!file) return;
+    setUploadingLogo(true);
+    try {
+      const url = await uploadWebsiteImage(file, "logo");
+      setLogoUrl(url);
+      toast.success("Logo uploaded");
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message || "Failed to upload logo");
+    } finally {
+      setUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = "";
+    }
+  };
+
+  const handleHeroFilePick = async (file?: File | null) => {
+    if (!file) return;
+    setUploadingHero(true);
+    try {
+      const url = await uploadWebsiteImage(file, "hero");
+      setHeroImage(url);
+      toast.success("Hero image uploaded");
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message || "Failed to upload hero image");
+    } finally {
+      setUploadingHero(false);
+      if (heroInputRef.current) heroInputRef.current.value = "";
+    }
+  };
+
+// --- 2. Save Data ---
   const handleSave = async () => {
     if (!firebaseUser) return;
     setSaving(true);
@@ -254,6 +306,7 @@ export default function WebsiteSettings() {
       const websiteConfig: any = {
         coachingName,
         tagline,
+        logoUrl,
         heroImage,
         themeId,
         socials: {
@@ -514,15 +567,12 @@ export default function WebsiteSettings() {
 
                 <button
                   type="button"
-                  onClick={() => setThemeId("theme3")}
-                  className={
-                    `text-left rounded-xl border p-4 transition-all hover:bg-muted/40 ` +
-                    (themeId === "theme3" ? "border-primary ring-1 ring-primary/20 bg-primary/5" : "border-border")
-                  }
+                  disabled
+                  className="text-left rounded-xl border p-4 opacity-60 cursor-not-allowed"
                 >
                   <div className="font-semibold">Theme 3</div>
-                  <div className="text-xs text-muted-foreground mt-1">Dark futuristic styish look</div>
-                  <div className="text-xs mt-3">New Arrival</div>
+                  <div className="text-xs text-muted-foreground mt-1">More options coming</div>
+                  <div className="text-xs mt-3">⏳ Coming soon</div>
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
@@ -537,6 +587,52 @@ export default function WebsiteSettings() {
                <CardDescription>This is the first thing students see on your landing page.</CardDescription>
              </CardHeader>
              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Logo Image URL</Label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Input
+                      value={logoUrl}
+                      onChange={(e) => setLogoUrl(e.target.value)}
+                      placeholder="https://example.com/logo.png"
+                    />
+                    <div className="flex gap-2">
+                      <input
+                        ref={logoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleLogoFilePick(e.target.files?.[0])}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => logoInputRef.current?.click()}
+                        disabled={uploadingLogo}
+                      >
+                        {uploadingLogo ? <Loader2 className="h-4 w-4 animate-spin" /> : "Upload"}
+                      </Button>
+                      {logoUrl ? (
+                        <Button type="button" variant="ghost" onClick={() => setLogoUrl("")}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {logoUrl ? (
+                    <div className="mt-2 flex items-center gap-3">
+                      <div className="h-14 w-14 rounded-xl overflow-hidden border bg-muted/30">
+                        <img src={logoUrl} alt="Logo Preview" className="h-full w-full object-cover" />
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        Tip: Use a square logo (512×512) for best results.
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-muted-foreground">No logo provided</div>
+                  )}
+                </div>
+
                 <div className="space-y-2">
                   <Label>Institute Name</Label>
                   <Input 
@@ -555,11 +651,35 @@ export default function WebsiteSettings() {
                 </div>
                 <div className="space-y-2">
                   <Label>Hero Image URL</Label>
-                  <Input 
-                    value={heroImage} 
-                    onChange={e => setHeroImage(e.target.value)} 
-                    placeholder="https://example.com/hero.jpg"
-                  />
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Input 
+                      value={heroImage} 
+                      onChange={e => setHeroImage(e.target.value)} 
+                      placeholder="https://example.com/hero.jpg"
+                    />
+                    <div className="flex gap-2">
+                      <input
+                        ref={heroInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => handleHeroFilePick(e.target.files?.[0])}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => heroInputRef.current?.click()}
+                        disabled={uploadingHero}
+                      >
+                        {uploadingHero ? <Loader2 className="h-4 w-4 animate-spin" /> : "Upload"}
+                      </Button>
+                      {heroImage ? (
+                        <Button type="button" variant="ghost" onClick={() => setHeroImage("")}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
                   {heroImage ? (
                     <div className="mt-2 relative h-40 rounded-md overflow-hidden border">
                       <img src={heroImage} alt="Hero Preview" className="w-full h-full object-cover" />

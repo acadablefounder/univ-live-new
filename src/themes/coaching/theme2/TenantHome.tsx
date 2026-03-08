@@ -301,26 +301,26 @@ export default function TenantHomeTheme2() {
               </div>
 
               <h1 className="text-5xl sm:text-6xl lg:text-[72px] font-extrabold tracking-tighter text-zinc-950 leading-[1.05] mb-6">
-                Build skills that <br className="hidden sm:block" />
-                <span className="text-zinc-500">work when you don't</span>
+                Your CUET Preparation<br className="hidden sm:block" />
+                <span className="text-zinc-500">Starts With {coachingName}</span>
               </h1>
 
-              <p className="text-lg sm:text-xl text-zinc-600 mb-10 leading-relaxed max-w-lg">
+              {/* <p className="text-lg sm:text-xl text-zinc-600 mb-10 leading-relaxed max-w-lg">
                 Turn your efforts into top-tier results. Structured test series, expert faculty, and deep analytics designed to give you freedom over your scores.
-              </p>
+              </p> */}
 
               <div className="flex flex-col sm:flex-row gap-4 mb-10">
                 <a href="#tests" className="w-full sm:w-auto">
                   <Button className="w-full sm:w-auto rounded-full bg-zinc-950 text-white hover:bg-zinc-800 px-8 py-6 text-base font-semibold shadow-xl shadow-zinc-900/10">
-                    Start Learning
+                    Get Started
                   </Button>
                 </a>
-                <Link to="/login?role=student" className="w-full sm:w-auto">
+                {/* <Link to="/login?role=student" className="w-full sm:w-auto">
                   <Button variant="outline" className="w-full sm:w-auto rounded-full bg-white border-zinc-200 text-zinc-950 hover:bg-zinc-50 px-8 py-6 text-base font-semibold shadow-sm">
                     <Play className="mr-2 h-4 w-4 fill-zinc-900" />
                     Watch free preview
                   </Button>
-                </Link>
+                </Link> */}
               </div>
 
               {(stats?.length > 0) && (
