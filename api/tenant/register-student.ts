@@ -2,7 +2,6 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getAdmin } from "../_lib/firebaseAdmin.js";
 import { requireUser } from "../_lib/requireUser.js";
 
-
 function normSlug(x: string) {
   return String(x || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
 }
@@ -36,26 +35,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const learnerRef = db.doc(`educators/${educatorId}/students/${uid}`);
 
     await db.runTransaction(async (tx) => {
+      // FIX: ALL reads must happen before ANY writes in a Firestore transaction.
+      // The old code did: read userSnap → write userRef → read learnerSnap → write learnerRef
+      // which threw "reads must be executed before all writes".
+      // Correct order: read userSnap + read learnerSnap → write userRef + write learnerRef
+
       const userSnap = await tx.get(userRef);
+      const learnerSnap = await tx.get(learnerRef); // ← moved up before any writes
+
       const userData = userSnap.exists ? userSnap.data() || {} : {};
 
       const displayName =
         String(userData.displayName || user.decoded?.name || req.body?.displayName || "").trim() || "Student";
       const email = String(userData.email || user.email || user.decoded?.email || req.body?.email || "").trim();
 
+      // --- WRITES (after all reads) ---
+
       const profilePayload: any = {
         role: "STUDENT",
         displayName,
         email,
         educatorId,
-        tenantSlug, // legacy
+        tenantSlug,
         enrolledTenants: admin.firestore.FieldValue.arrayUnion(tenantSlug),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
       if (!userSnap.exists) profilePayload.createdAt = admin.firestore.FieldValue.serverTimestamp();
       tx.set(userRef, profilePayload, { merge: true });
 
-      const learnerSnap = await tx.get(learnerRef);
       const learnerPayload: any = {
         uid,
         name: displayName,
@@ -75,4 +82,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: e?.message || "Server error" });
   }
 }
-
