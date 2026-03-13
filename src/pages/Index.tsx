@@ -16,7 +16,7 @@ const Index = () => {
       <PricingSection />
       <CTASection />
       <TestimonialsSection />
-      <TeamSection />
+      {/* <TeamSection /> */}
     </Layout>
   );
 };

@@ -177,51 +177,6 @@ export default function EducatorLayout() {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-4">
-            {/* Theme Toggle */}
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {theme === "dark" ? (
-                <Sun className="h-5 w-5" />
-              ) : (
-                <Moon className="h-5 w-5" />
-              )}
-            </Button>
-
-            {/* Notifications */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative">
-                  <Bell className="h-5 w-5" />
-                  <span className="absolute top-1 right-1 w-2 h-2 bg-destructive rounded-full" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80">
-                <DropdownMenuLabel>Notifications</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem className="flex flex-col items-start gap-1 cursor-pointer">
-                  <span className="font-medium">New student joined</span>
-                  <span className="text-xs text-muted-foreground">
-                    Rahul Sharma joined NEET Batch 2024
-                  </span>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="flex flex-col items-start gap-1 cursor-pointer">
-                  <span className="font-medium">Test completed</span>
-                  <span className="text-xs text-muted-foreground">
-                    5 students completed Physics Mock Test
-                  </span>
-                </DropdownMenuItem>
-                <DropdownMenuItem className="flex flex-col items-start gap-1 cursor-pointer">
-                  <span className="font-medium">Payment received</span>
-                  <span className="text-xs text-muted-foreground">
-                    ₹2,999 received from Priya Patel
-                  </span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
 
             {/* User Menu */}
             <DropdownMenu>

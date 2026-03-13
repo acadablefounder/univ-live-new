@@ -38,7 +38,7 @@ function getWhatsAppNumber(): string {
   // Use Vite env if set, else fallback
   const fromEnv = (import.meta as any)?.env?.VITE_SALES_WHATSAPP_NUMBER;
   const n = String(fromEnv || "").replace(/\D/g, "");
-  return n || "919999999999"; // CHANGE this fallback to your real sales number
+  return n || "918319937769"; // CHANGE this fallback to your real sales number
 }
 
 function waLink(number: string, message: string) {

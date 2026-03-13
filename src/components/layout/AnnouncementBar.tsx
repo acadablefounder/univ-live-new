@@ -7,7 +7,7 @@ export const SHOW_ANNOUNCEMENT = true;
 
 // Announcement content - easy to update
 const ANNOUNCEMENT = {
-  text: "🎉 Launch Offer: Get 50% off on all plans",
+  text: "🎉 Launch Offer: Get 30% off on all plans",
   ctaText: "Claim Now",
   ctaLink: "/pricing",
 };

@@ -214,7 +214,7 @@ export default function TenantHomeTheme2() {
   ];
 
   return (
-    <div id="top" className="min-h-screen bg-[#FAFAFA] text-zinc-900 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+    <div id="top" className="min-h-screen bg-[#FAFAFA] text-zinc-900 selection:bg-indigo-100 selection:text-indigo-900" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
       {/* NAVBAR */}
       <nav className="sticky top-0 z-50 bg-[#FAFAFA]/80 backdrop-blur-xl border-b border-zinc-200/50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-between h-20">
@@ -305,22 +305,12 @@ export default function TenantHomeTheme2() {
                 <span className="text-zinc-500">Starts With {coachingName}</span>
               </h1>
 
-              {/* <p className="text-lg sm:text-xl text-zinc-600 mb-10 leading-relaxed max-w-lg">
-                Turn your efforts into top-tier results. Structured test series, expert faculty, and deep analytics designed to give you freedom over your scores.
-              </p> */}
-
               <div className="flex flex-col sm:flex-row gap-4 mb-10">
                 <a href="#tests" className="w-full sm:w-auto">
                   <Button className="w-full sm:w-auto rounded-full bg-zinc-950 text-white hover:bg-zinc-800 px-8 py-6 text-base font-semibold shadow-xl shadow-zinc-900/10">
                     Get Started
                   </Button>
                 </a>
-                {/* <Link to="/login?role=student" className="w-full sm:w-auto">
-                  <Button variant="outline" className="w-full sm:w-auto rounded-full bg-white border-zinc-200 text-zinc-950 hover:bg-zinc-50 px-8 py-6 text-base font-semibold shadow-sm">
-                    <Play className="mr-2 h-4 w-4 fill-zinc-900" />
-                    Watch free preview
-                  </Button>
-                </Link> */}
               </div>
 
               {(stats?.length > 0) && (
@@ -356,16 +346,6 @@ export default function TenantHomeTheme2() {
                     <p className="font-medium text-sm">Add a hero image in settings</p>
                   </div>
                 )}
-                
-                <div className="absolute bottom-6 left-6 right-6 bg-white/90 backdrop-blur-md border border-white/20 p-4 rounded-2xl shadow-lg flex items-center gap-4">
-                  <div className="h-10 w-10 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-zinc-950">New milestone unlocked</p>
-                    <p className="text-xs font-medium text-zinc-500">Ready to conquer the next test.</p>
-                  </div>
-                </div>
               </div>
             </motion.div>
 
@@ -474,84 +454,6 @@ export default function TenantHomeTheme2() {
       <section id="tests" className="py-24 bg-white border-t border-zinc-100">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           
-          {/* Featured Section */}
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
-            <div>
-               <div className="inline-flex items-center justify-center rounded-full bg-white border border-zinc-200 px-4 py-1.5 mb-6 shadow-sm">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">
-                  EXAM CENTER
-                </span>
-              </div>
-              <h2 className="text-4xl font-extrabold tracking-tight text-zinc-950">
-                Featured Series
-              </h2>
-            </div>
-          </div>
-
-          {loadingFeatured ? (
-            <div className="py-20 flex justify-center text-zinc-500">
-              <Loader2 className="h-6 w-6 animate-spin mr-3" />
-              <span className="font-medium">Loading test series...</span>
-            </div>
-          ) : featured.length === 0 ? (
-            <div className="py-20 text-center text-zinc-500 font-medium bg-[#FAFAFA] rounded-3xl border border-zinc-100 mb-16">
-              No featured series available right now.
-            </div>
-          ) : (
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-24">
-              {featured.slice(0, 4).map((t, idx) => (
-                <motion.div
-                  key={t.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: idx * 0.1 }}
-                >
-                  <Card className="h-full flex flex-col overflow-hidden rounded-[1.5rem] border-zinc-200 shadow-sm hover:shadow-xl transition-all duration-300 bg-white group cursor-pointer">
-                    <div className="aspect-[4/3] bg-zinc-100 overflow-hidden relative">
-                      {t.coverImage ? (
-                        <img src={t.coverImage} alt={t.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-zinc-300">
-                          <FileText className="h-12 w-12" />
-                        </div>
-                      )}
-                      {t.subject && (
-                        <div className="absolute top-4 left-4">
-                          <span className="bg-white/90 backdrop-blur-sm text-zinc-900 text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">
-                            {t.subject}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <CardContent className="p-6 flex-1 flex flex-col justify-between">
-                      <div>
-                        <h3 className="text-lg font-bold text-zinc-950 leading-tight mb-2 line-clamp-2">
-                          {t.title}
-                        </h3>
-                        <p className="text-sm text-zinc-500 line-clamp-2 mb-6 leading-relaxed">
-                          {t.description}
-                        </p>
-                      </div>
-                      
-                      <div className="flex items-center justify-between mt-auto">
-                        <span className="text-lg font-extrabold text-zinc-950">
-                          {t.price === "Included" || t.price == 0 ? "Free" : `₹${t.price}`}
-                        </span>
-                        <Link to="/login?role=student">
-                          <Button size="sm" className="rounded-full bg-zinc-950 text-white font-semibold hover:bg-zinc-800">
-                            Enroll
-                          </Button>
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-          )}
-
           {/* NEW: OUR TESTS (CUET Style Subject Cards) */}
           <div className="mb-12">
             <h2 className="text-4xl font-extrabold tracking-tight text-zinc-950 mb-4">
@@ -570,10 +472,9 @@ export default function TenantHomeTheme2() {
                 transition={{ duration: 0.4, delay: idx * 0.05 }}
                 className="bg-white border border-zinc-200 rounded-[2rem] p-6 shadow-[0_4px_20px_rgb(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300 relative overflow-hidden group"
               >
-                {/* Decorative right-side circle icon mimic */}
-                <div className="absolute right-6 top-6 h-12 w-12 bg-orange-500 rounded-full flex items-center justify-center border-4 border-white shadow-sm overflow-hidden">
-                   <div className="w-full h-1/2 bg-green-600 absolute bottom-0 left-0" />
-                   <CheckCircle2 className="h-6 w-6 text-white relative z-10" />
+                {/* Updated with the provided NTA logo URL */}
+                <div className="absolute right-6 top-6 h-12 w-12 bg-white rounded-full flex items-center justify-center border-2 border-zinc-100 shadow-sm overflow-hidden p-1 z-10">
+                   <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQs7iboUwzXcYfbV94AQ5DctkCyCVqRc-0zwA&s" alt="NTA Logo" className="w-full h-full object-contain" />
                 </div>
 
                 <div className="pr-16 mb-8">
