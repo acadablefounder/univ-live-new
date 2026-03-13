@@ -455,11 +455,18 @@ export default function TenantHomeTheme2() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           
           {/* NEW: OUR TESTS (CUET Style Subject Cards) */}
-          <div className="mb-12">
-            <h2 className="text-4xl font-extrabold tracking-tight text-zinc-950 mb-4">
-              Our Tests
-            </h2>
-            <p className="text-zinc-500">Master every subject with dedicated mock tests.</p>
+          <div className="mb-12 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+            <div>
+              <h2 className="text-4xl font-extrabold tracking-tight text-zinc-950 mb-4">
+                Our Tests
+              </h2>
+              <p className="text-zinc-500">Master every subject with dedicated mock tests.</p>
+            </div>
+            <Link to="/login?role=student" className="shrink-0">
+              <Button className="rounded-full bg-zinc-950 text-white hover:bg-zinc-800 px-8 py-6 text-base font-semibold shadow-sm">
+                Get Started
+              </Button>
+            </Link>
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -472,7 +479,7 @@ export default function TenantHomeTheme2() {
                 transition={{ duration: 0.4, delay: idx * 0.05 }}
                 className="bg-white border border-zinc-200 rounded-[2rem] p-6 shadow-[0_4px_20px_rgb(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] transition-all duration-300 relative overflow-hidden group"
               >
-                {/* Updated with the provided NTA logo URL */}
+                {/* NTA logo */}
                 <div className="absolute right-6 top-6 h-12 w-12 bg-white rounded-full flex items-center justify-center border-2 border-zinc-100 shadow-sm overflow-hidden p-1 z-10">
                    <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQs7iboUwzXcYfbV94AQ5DctkCyCVqRc-0zwA&s" alt="NTA Logo" className="w-full h-full object-contain" />
                 </div>
@@ -487,7 +494,7 @@ export default function TenantHomeTheme2() {
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 mb-6">
+                <div className="flex flex-wrap items-center gap-2 mb-2">
                   <div className="bg-[#FAFAFA] border border-zinc-200 text-zinc-600 text-xs font-semibold px-3 py-1.5 rounded-full flex items-center gap-1.5">
                     <FileText className="h-3 w-3" /> {subject.lang}
                   </div>
@@ -495,12 +502,6 @@ export default function TenantHomeTheme2() {
                     <Users className="h-3 w-3" /> {subject.attempts} attempted
                   </div>
                 </div>
-
-                <Link to="/login?role=student" className="block">
-                  <Button className="w-full rounded-full bg-zinc-50 text-zinc-950 border border-zinc-200 hover:bg-zinc-100 hover:text-zinc-950 font-semibold shadow-none transition-colors">
-                    Get Started
-                  </Button>
-                </Link>
               </motion.div>
             ))}
           </div>
