@@ -258,7 +258,7 @@ export default function WebsiteSettings() {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const ts = Date.now();
     const folder = `/website-assets/${firebaseUser.uid}`;
-    const res = await uploadToImageKit(file, `${kind}-${ts}-${safeName}`, folder);
+    const res = await uploadToImageKit(file, `${kind}-${ts}-${safeName}`, folder, "website");
     return res.url;
   };
 
