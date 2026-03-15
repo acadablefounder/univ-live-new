@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { AlertTriangle, Flag, ChevronLeft, ChevronRight, Save, Trash2, Maximize2 } from "lucide-react";
+import { AlertTriangle, Flag, ChevronLeft, ChevronRight, Save, Trash2, Maximize2, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,6 +17,12 @@ import { HtmlView } from "@/lib/safeHtml";
 import { useAuth } from "@/contexts/AuthProvider";
 import { useTenant } from "@/contexts/TenantProvider";
 import { db } from "@/lib/firebase";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   addDoc,
   collection,
@@ -159,6 +165,8 @@ export default function StudentCBTAttempt() {
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [timerStartSeconds, setTimerStartSeconds] = useState(0);
+
+  const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
 
   const attemptIdStorageKey = useMemo(
     () => `${LS_ATTEMPT_ID_PREFIX}${tenantSlug || "main"}__${testId || ""}`,
@@ -647,7 +655,7 @@ export default function StudentCBTAttempt() {
   const timerKey = isStarted ? `running_${attemptId || "new"}` : `paused_${attemptId || "new"}`;
 
   return (
-    <div className="fixed inset-0 z-[99999] bg-background flex flex-col lg:flex-row gap-4 p-4 overflow-hidden">
+    <div className="fixed inset-0 z-[99999] h-[100dvh] bg-background flex flex-col lg:flex-row gap-2 sm:gap-4 p-2 sm:p-4 overflow-hidden">
       {/* Instructions Gate (must proceed to start) */}
       {!isStarted && instructionsOpen && (
         <div className="fixed inset-0 z-[100000] bg-black/60 backdrop-blur-[2px] flex items-center justify-center p-4">
@@ -728,31 +736,46 @@ export default function StudentCBTAttempt() {
       )}
 
 {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 min-h-0 flex flex-col min-w-0">
         {/* Header */}
-        <div className="flex items-center justify-between gap-4 p-4 bg-card rounded-xl mb-4">
-          <div className="flex items-center gap-4">
-            {isStarted ? (
-              <TimerChip key={timerKey} initialSeconds={timerStartSeconds} onTimeUp={handleTimeUp} />
-            ) : (
-              <div className="px-3 py-1 rounded-full bg-muted text-xs font-semibold">{`Not started • ${testMeta.durationMinutes}m`}</div>
-            )}
-            <div className="hidden sm:block">
-              <p className="font-semibold text-sm">{testMeta.title}</p>
-              <p className="text-xs text-muted-foreground">
-                Question {currentIndex + 1} of {questions.length}
-              </p>
+        <div className="shrink-0 flex flex-col gap-3 p-3 sm:p-4 bg-card rounded-xl mb-3 sm:mb-4">
+          <div className="flex items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+              {isStarted ? (
+                <TimerChip key={timerKey} initialSeconds={timerStartSeconds} onTimeUp={handleTimeUp} />
+              ) : (
+                <div className="px-3 py-1 rounded-full bg-muted text-xs font-semibold whitespace-nowrap">
+                  {`Not started • ${testMeta.durationMinutes}m`}
+                </div>
+              )}
+
+              <div className="min-w-0">
+                <p className="font-semibold text-sm sm:text-base truncate">{testMeta.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  Question {currentIndex + 1} of {questions.length}
+                </p>
+              </div>
             </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-lg lg:hidden shrink-0"
+              onClick={() => setMobilePaletteOpen(true)}
+            >
+              <LayoutGrid className="h-4 w-4 mr-1" />
+              Palette
+            </Button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className={cn("flex items-center gap-1 text-xs", saving ? "text-yellow-600" : "text-green-600")}>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className={cn("flex items-center gap-1 text-xs mr-auto", saving ? "text-yellow-600" : "text-green-600")}>
               <Save className="h-3 w-3" />
               {saving ? "Saving…" : lastSavedAt ? "Saved" : "Ready"}
             </div>
 
             {!isStarted && (
-              <Button size="sm" className="rounded-lg gradient-bg" onClick={handleStart}>
+              <Button size="sm" className="rounded-lg gradient-bg w-full sm:w-auto" onClick={handleStart}>
                 {attemptId ? "Resume" : "Start"}
               </Button>
             )}
@@ -760,7 +783,7 @@ export default function StudentCBTAttempt() {
             <Button
               variant="destructive"
               size="sm"
-              className="rounded-lg"
+              className="rounded-lg w-full sm:w-auto"
               onClick={() => setSubmitDialogOpen(true)}
               disabled={!isStarted}
             >
@@ -783,8 +806,8 @@ export default function StudentCBTAttempt() {
         )}
 
         {/* Question Area */}
-        <Card className="flex-1 card-soft border-0 overflow-auto">
-          <CardContent className="p-6 space-y-6">
+        <Card className="flex-1 min-h-0 card-soft border-0 overflow-auto">
+          <CardContent className="p-4 sm:p-6 space-y-4 sm:space-y-6">
             {!!currentQuestion.passage && (
               <div className="p-4 bg-pastel-cream rounded-xl">
                 <p className="font-semibold mb-2">{currentQuestion.passage.title}</p>
@@ -793,7 +816,7 @@ export default function StudentCBTAttempt() {
             )}
 
             <div>
-              <div className="font-semibold text-lg flex gap-2">
+              <div className="font-semibold text-base sm:text-lg flex gap-2">
                 <span className="shrink-0">Q{currentIndex + 1}.</span>
                 <HtmlView html={currentQuestion.stem} className="flex-1" />
               </div>
@@ -810,7 +833,7 @@ export default function StudentCBTAttempt() {
                   <div
                     key={option.id}
                     className={cn(
-                      "flex items-center space-x-3 p-4 rounded-xl border-2 transition-colors cursor-pointer",
+                      "flex items-start space-x-2 sm:space-x-3 p-3 sm:p-4 rounded-xl border-2 transition-colors cursor-pointer",
                       responses[currentQuestion.id]?.answer === option.id
                         ? "border-primary bg-primary/5"
                         : "border-border hover:border-primary/50",
@@ -836,7 +859,7 @@ export default function StudentCBTAttempt() {
                 placeholder="Enter your answer"
                 value={responses[currentQuestion.id]?.answer || ""}
                 onChange={(e) => handleAnswer(e.target.value)}
-                className="max-w-xs rounded-xl text-lg"
+                className="w-full sm:max-w-xs rounded-xl text-base sm:text-lg"
                 disabled={!isStarted}
               />
             )}
@@ -844,15 +867,24 @@ export default function StudentCBTAttempt() {
         </Card>
 
         {/* Navigation */}
-        <div className="flex items-center justify-between gap-2 mt-4">
-          <div className="flex gap-2">
-            <Button variant="outline" className="rounded-xl" onClick={handleClearResponse} disabled={!isStarted}>
+        <div className="shrink-0 mt-3 sm:mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="grid grid-cols-2 sm:flex gap-2">
+            <Button
+              variant="outline"
+              className="rounded-xl w-full sm:w-auto"
+              onClick={handleClearResponse}
+              disabled={!isStarted}
+            >
               <Trash2 className="h-4 w-4 mr-1" />
               Clear
             </Button>
+
             <Button
               variant={responses[currentQuestion.id]?.markedForReview ? "default" : "outline"}
-              className={cn("rounded-xl", responses[currentQuestion.id]?.markedForReview && "bg-purple-500 hover:bg-purple-600")}
+              className={cn(
+                "rounded-xl w-full sm:w-auto",
+                responses[currentQuestion.id]?.markedForReview && "bg-purple-500 hover:bg-purple-600"
+              )}
               onClick={handleMarkForReview}
               disabled={!isStarted}
             >
@@ -861,13 +893,23 @@ export default function StudentCBTAttempt() {
             </Button>
           </div>
 
-          <div className="flex gap-2">
-            <Button variant="outline" className="rounded-xl" disabled={currentIndex === 0} onClick={() => goToIndex(currentIndex - 1)}>
-              <ChevronLeft className="h-4 w-4" />
+          <div className="grid grid-cols-2 sm:flex gap-2">
+            <Button
+              variant="outline"
+              className="rounded-xl w-full sm:w-auto"
+              disabled={currentIndex === 0}
+              onClick={() => goToIndex(currentIndex - 1)}
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
               Prev
             </Button>
-            <Button className="rounded-xl gradient-bg" disabled={currentIndex === questions.length - 1} onClick={() => goToIndex(currentIndex + 1)}>
-              Next <ChevronRight className="h-4 w-4" />
+
+            <Button
+              className="rounded-xl gradient-bg w-full sm:w-auto"
+              disabled={currentIndex === questions.length - 1}
+              onClick={() => goToIndex(currentIndex + 1)}
+            >
+              Next <ChevronRight className="h-4 w-4 ml-1" />
             </Button>
           </div>
         </div>
@@ -887,6 +929,28 @@ export default function StudentCBTAttempt() {
           />
         </CardContent>
       </Card>
+
+      <Sheet open={mobilePaletteOpen} onOpenChange={setMobilePaletteOpen}>
+        <SheetContent side="bottom" className="lg:hidden h-[78dvh] rounded-t-3xl px-0 pb-0">
+          <SheetHeader className="px-4 pt-2 pb-4 border-b text-left">
+            <SheetTitle className="text-base">Question Palette</SheetTitle>
+          </SheetHeader>
+
+          <div className="h-[calc(78dvh-64px)] overflow-y-auto px-4 py-4">
+            <CBTQuestionPalette
+              questions={questions.map((q) => ({ id: q.id, sectionId: q.sectionId }))}
+              responses={responses}
+              currentQuestionIndex={currentIndex}
+              onQuestionClick={(idx) => {
+                goToIndex(idx);
+                setMobilePaletteOpen(false);
+              }}
+              sections={testMeta.sections}
+              currentSectionId={currentSectionId}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Submit Dialog */}
   
