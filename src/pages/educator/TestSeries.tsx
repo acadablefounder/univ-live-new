@@ -14,6 +14,7 @@ import {
   Copy,
   Image as ImageIcon,
   CheckCircle2,
+  FileUp,
   XCircle,
 } from "lucide-react";
 
@@ -30,6 +31,14 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 
 import EmptyState from "@/components/educator/EmptyState";
+import AiQuestionImportOverlay from "@/components/educator/AiQuestionImportOverlay";
+import {
+  buildImportedQuestionPayload,
+  formatNegativeMarksDisplay,
+  importQuestionsFromPdf,
+  type AiImportPreviewItem,
+  type AiImportSummary,
+} from "@/lib/aiQuestionImport";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
 
 // Firebase
@@ -266,6 +275,7 @@ export default function TestSeries() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
         createdBy: currentUser.uid,
+        questionsCount: 0,
       });
 
       const newTestRef = await addDoc(collection(db, "educators", currentUser.uid, "my_tests"), meta);
@@ -273,17 +283,21 @@ export default function TestSeries() {
       // Copy questions from test_series/{id}/questions → educators/{uid}/my_tests/{new}/questions
       const questionsSnap = await getDocs(collection(db, "test_series", bankTest.id, "questions"));
       const batch = writeBatch(db);
+      let activeCount = 0;
 
       questionsSnap.forEach((qDoc) => {
+        const data = qDoc.data();
+        if (data?.isActive !== false) activeCount += 1;
         const newQRef = doc(collection(db, "educators", currentUser.uid, "my_tests", newTestRef.id, "questions"));
         batch.set(newQRef, {
-          ...qDoc.data(),
+          ...data,
           importedFromTestId: bankTest.id,
           importedAt: serverTimestamp(),
         });
       });
 
       await batch.commit();
+      await updateDoc(newTestRef, { questionsCount: activeCount, updatedAt: serverTimestamp() });
 
       toast.success("Imported to your library");
       setActiveTab("library");
@@ -316,6 +330,7 @@ export default function TestSeries() {
 
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      questionsCount: 0,
     };
 
     setCreating(true);
@@ -545,6 +560,8 @@ export default function TestSeries() {
       {isManageOpen && selectedTest && currentUser && (
         <QuestionsManager
           testId={selectedTest.id}
+          testTitle={selectedTest.title}
+          testSubject={selectedTest.subject}
           educatorUid={currentUser.uid}
           onClose={() => setIsManageOpen(false)}
         />
@@ -560,10 +577,14 @@ export default function TestSeries() {
 // ------------------------------
 function QuestionsManager({
   testId,
+  testTitle,
+  testSubject,
   educatorUid,
   onClose,
 }: {
   testId: string;
+  testTitle?: string;
+  testSubject?: string;
   educatorUid: string;
   onClose: () => void;
 }) {
@@ -574,7 +595,6 @@ function QuestionsManager({
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  // editor state
   const [formQuestion, setFormQuestion] = useState("");
   const [formOptions, setFormOptions] = useState<string[]>(["", "", "", ""]);
   const [formCorrect, setFormCorrect] = useState(0);
@@ -589,10 +609,34 @@ function QuestionsManager({
   const [saving, setSaving] = useState(false);
   const [imgBusy, setImgBusy] = useState<null | "q" | "e" | 0 | 1 | 2 | 3>(null);
 
+  const [importPreviewOpen, setImportPreviewOpen] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [savingImported, setSavingImported] = useState(false);
+  const [importFileName, setImportFileName] = useState("");
+  const [importSummary, setImportSummary] = useState<AiImportSummary | null>(null);
+  const [importItems, setImportItems] = useState<AiImportPreviewItem[]>([]);
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
+
   const qCol = useMemo(
     () => collection(db, "educators", educatorUid, "my_tests", testId, "questions"),
     [educatorUid, testId]
   );
+
+  async function syncTestQuestionCount() {
+    try {
+      const snap = await getDocs(qCol);
+      let activeCount = 0;
+      snap.forEach((item) => {
+        if (item.data()?.isActive !== false) activeCount += 1;
+      });
+      await updateDoc(doc(db, "educators", educatorUid, "my_tests", testId), {
+        questionsCount: activeCount,
+        updatedAt: serverTimestamp(),
+      });
+    } catch (error) {
+      console.error("Failed to sync question count", error);
+    }
+  }
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -661,9 +705,26 @@ function QuestionsManager({
   async function saveQuestion() {
     if (saving) return;
 
+    const trimmedQuestion = formQuestion.trim();
+    const normalizedOptions = formOptions.map((value) => value ?? "");
+    const nonEmptyOptions = normalizedOptions.filter((value) => value.trim() !== "");
+
+    if (!trimmedQuestion) {
+      toast.error("Question is required");
+      return;
+    }
+    if (nonEmptyOptions.length < 2) {
+      toast.error("At least two options are required");
+      return;
+    }
+    if (!normalizedOptions[formCorrect] || normalizedOptions[formCorrect].trim() === "") {
+      toast.error("Correct option cannot be empty");
+      return;
+    }
+
     const payload: any = {
       question: formQuestion,
-      options: formOptions.map((x) => x ?? ""),
+      options: normalizedOptions,
       correctOption: Number(formCorrect) || 0,
       explanation: formExplanation || "",
       difficulty: formDifficulty || "medium",
@@ -673,7 +734,6 @@ function QuestionsManager({
       updatedAt: serverTimestamp(),
     };
 
-    // optional marks
     if (formMarks.trim() !== "") payload.marks = Number(formMarks);
     else payload.marks = null;
 
@@ -693,6 +753,7 @@ function QuestionsManager({
         await updateDoc(doc(qCol, editingId), payload);
         toast.success("Question updated");
       }
+      await syncTestQuestionCount();
       setEditorOpen(false);
       resetEditor();
     } catch (e) {
@@ -707,6 +768,7 @@ function QuestionsManager({
     if (!confirm("Delete this question?")) return;
     try {
       await deleteDoc(doc(qCol, id));
+      await syncTestQuestionCount();
       toast.success("Deleted");
       if (editingId === id) {
         setEditorOpen(false);
@@ -736,6 +798,7 @@ function QuestionsManager({
         source: "manual",
         duplicatedAt: serverTimestamp(),
       });
+      await syncTestQuestionCount();
       toast.success("Duplicated");
     } catch (e) {
       console.error(e);
@@ -746,21 +809,118 @@ function QuestionsManager({
   async function toggleActive(q: TestQuestion, next: boolean) {
     try {
       await updateDoc(doc(qCol, q.id), { isActive: next, updatedAt: serverTimestamp() });
+      await syncTestQuestionCount();
     } catch (e) {
       console.error(e);
       toast.error("Failed to update");
     }
   }
 
+  async function handlePdfSelected(file: File | null) {
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      toast.error("Please upload a PDF file only");
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      toast.error("Please upload a PDF up to 3 MB for AI import");
+      return;
+    }
+
+    setImportBusy(true);
+    setImportFileName(file.name);
+    setImportPreviewOpen(true);
+    setImportItems([]);
+    setImportSummary(null);
+
+    try {
+      const result = await importQuestionsFromPdf(file, { testTitle, subject: testSubject });
+      const previewItems: AiImportPreviewItem[] = (result.items || []).map((item) => ({
+        ...item,
+        include: item.status === "ready",
+      }));
+      setImportItems(previewItems);
+      setImportSummary(result.summary || null);
+      toast.success("AI import preview is ready");
+    } catch (error) {
+      console.error(error);
+      toast.error(error instanceof Error ? error.message : "Failed to import PDF with AI");
+      setImportPreviewOpen(false);
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  function updateImportItemInclude(sourceIndex: number, include: boolean) {
+    setImportItems((prev) => prev.map((item) => (item.sourceIndex === sourceIndex ? { ...item, include } : item)));
+  }
+
+  function selectReadyOnly() {
+    setImportItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        include: item.status === "ready",
+      }))
+    );
+  }
+
+  function toggleAllPartials(include: boolean) {
+    setImportItems((prev) =>
+      prev.map((item) =>
+        item.status === "partial"
+          ? { ...item, include }
+          : item.status === "ready"
+            ? { ...item, include: true }
+            : { ...item, include: false }
+      )
+    );
+  }
+
+  async function saveImportedQuestions() {
+    const selected = importItems.filter((item) => item.include && item.status !== "rejected");
+    if (!selected.length) {
+      toast.error("No questions selected to save");
+      return;
+    }
+
+    setSavingImported(true);
+    try {
+      for (let i = 0; i < selected.length; i += 200) {
+        const batch = writeBatch(db);
+        for (const item of selected.slice(i, i + 200)) {
+          const payload = buildImportedQuestionPayload(item);
+          const newRef = doc(qCol);
+          batch.set(newRef, {
+            ...payload,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+        await batch.commit();
+      }
+
+      await syncTestQuestionCount();
+      toast.success(`${selected.length} imported question${selected.length === 1 ? "" : "s"} saved`);
+      setImportPreviewOpen(false);
+      setImportItems([]);
+      setImportSummary(null);
+      if (!editorOpen) openNew();
+    } catch (error) {
+      console.error(error);
+      toast.error("Failed to save imported questions");
+    } finally {
+      setSavingImported(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-background w-full max-w-6xl h-[92vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl">
-        {/* Header */}
+      <div className="relative bg-background w-full max-w-6xl h-[92vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl">
         <div className="p-4 border-b flex items-center justify-between bg-muted/30">
           <div className="min-w-0">
             <h2 className="font-bold text-lg">Manage Questions</h2>
             <p className="text-xs text-muted-foreground">
-              Manual questions only (no global question bank import).
+              Add questions manually or import them from a PDF with AI. Saved questions stay in the same Firestore path.
             </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} className="rounded-xl">
@@ -769,12 +929,32 @@ function QuestionsManager({
         </div>
 
         <div className="flex-1 flex overflow-hidden">
-          {/* Left: list */}
           <div className="w-[380px] border-r flex flex-col bg-muted/10">
             <div className="p-4 border-b space-y-3">
               <Button className="w-full rounded-xl" onClick={openNew}>
                 <Plus className="mr-2 h-4 w-4" /> Add Question
               </Button>
+
+              <Button
+                variant="outline"
+                className="w-full rounded-xl"
+                onClick={() => pdfInputRef.current?.click()}
+                disabled={importBusy}
+              >
+                {importBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}
+                Import PDF with AI
+              </Button>
+              <input
+                ref={pdfInputRef}
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={async (event) => {
+                  const file = event.target.files?.[0] || null;
+                  event.currentTarget.value = "";
+                  await handlePdfSelected(file);
+                }}
+              />
 
               <div className="relative">
                 <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
@@ -811,8 +991,13 @@ function QuestionsManager({
                             {(q.difficulty || "medium").toUpperCase()}
                           </Badge>
                           <Badge variant="outline" className="text-[10px] rounded-full">
-                            +{q.marks ?? "—"} / -{q.negativeMarks ?? "—"}
+                            +{q.marks ?? "—"} / {formatNegativeMarksDisplay(q.negativeMarks)}
                           </Badge>
+                          {q.source === "ai_import" ? (
+                            <Badge variant="outline" className="text-[10px] rounded-full">AI</Badge>
+                          ) : q.source === "ai_import_partial" ? (
+                            <Badge variant="outline" className="text-[10px] rounded-full">AI Draft</Badge>
+                          ) : null}
                           {q.isActive !== false ? (
                             <Badge className="text-[10px] rounded-full">Active</Badge>
                           ) : (
@@ -864,7 +1049,6 @@ function QuestionsManager({
             </div>
           </div>
 
-          {/* Right: editor */}
           <div className="flex-1 overflow-y-auto">
             <div className="p-8 max-w-3xl mx-auto">
               <div className="flex items-center justify-between gap-2 mb-4">
@@ -873,7 +1057,7 @@ function QuestionsManager({
                     {editingId ? "Edit Question" : "Create Question"}
                   </h3>
                   <p className="text-xs text-muted-foreground">
-                    Supports HTML + images (ImageKit). Students will see images correctly.
+                    Supports HTML + images. AI-imported draft questions can be fixed here before activating them.
                   </p>
                 </div>
 
@@ -898,7 +1082,6 @@ function QuestionsManager({
                 </div>
               </div>
 
-              {/* Editor fields */}
               <div className="space-y-6">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -1038,12 +1221,12 @@ function QuestionsManager({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Marks (optional)</Label>
-                    <Input value={formMarks} onChange={(e) => setFormMarks(e.target.value)} className="rounded-xl" placeholder="e.g. 4" />
+                    <Label>Marks</Label>
+                    <Input value={formMarks} onChange={(e) => setFormMarks(e.target.value)} className="rounded-xl" placeholder="e.g. 5" />
                   </div>
                   <div className="space-y-2">
-                    <Label>Negative Marks (optional)</Label>
-                    <Input value={formNegMarks} onChange={(e) => setFormNegMarks(e.target.value)} className="rounded-xl" placeholder="e.g. 1" />
+                    <Label>Negative Marks</Label>
+                    <Input value={formNegMarks} onChange={(e) => setFormNegMarks(e.target.value)} className="rounded-xl" placeholder="e.g. -1" />
                   </div>
                 </div>
 
@@ -1092,10 +1275,10 @@ function QuestionsManager({
                     <CheckCircle2 className="h-4 w-4 text-green-600" />
                   </div>
                   <div>
-                    <p className="font-medium text-foreground">Educator restriction</p>
+                    <p className="font-medium text-foreground">AI import behavior</p>
                     <p>
-                      You can create/edit questions here, but you <span className="font-semibold">cannot</span> import from the global question bank.
-                      Importing is only available at the <span className="font-semibold">test</span> level (admin tests → your library).
+                      Imported questions are saved in <span className="font-semibold">educators/{educatorUid}/my_tests/{testId}/questions</span>.
+                      Partial AI questions stay inactive until you review and activate them.
                     </p>
                   </div>
                 </div>
@@ -1108,14 +1291,29 @@ function QuestionsManager({
           </div>
         </div>
 
-        {/* Bottom hint */}
         <div className="p-3 border-t bg-muted/20 text-xs text-muted-foreground flex items-center justify-between">
           <span>Stored in: educators/{educatorUid}/my_tests/{testId}/questions</span>
           <span className="flex items-center gap-2">
-            <XCircle className="h-4 w-4" />
-            No Question Bank Import
+            <FileUp className="h-4 w-4" />
+            Manual + AI PDF Import
           </span>
         </div>
+
+        <AiQuestionImportOverlay
+          open={importPreviewOpen}
+          fileName={importFileName}
+          summary={importSummary}
+          items={importItems}
+          importing={importBusy}
+          saving={savingImported}
+          onClose={() => {
+            if (!savingImported) setImportPreviewOpen(false);
+          }}
+          onItemIncludeChange={updateImportItemInclude}
+          onSelectReadyOnly={selectReadyOnly}
+          onToggleAllPartials={toggleAllPartials}
+          onSaveSelected={saveImportedQuestions}
+        />
       </div>
     </div>
   );

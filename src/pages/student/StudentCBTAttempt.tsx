@@ -93,7 +93,7 @@ const mapQuestion = (id: string, data: any): AttemptQuestion => {
   const opts: string[] = Array.isArray(data.options) ? data.options : [];
   const correctIndex = safeNumber(data.correctOption, 0);
   const positive = safeNumber(data.marks, 4);
-  const negative = safeNumber(data.negativeMarks, 1);
+  const negative = Math.abs(safeNumber(data.negativeMarks, 1));
 
   return {
     id,
@@ -269,7 +269,9 @@ export default function StudentCBTAttempt() {
           };
 
           const qSnap = await getDocs(s.qCol);
-          qs = qSnap.docs.map((q) => mapQuestion(q.id, q.data()));
+          qs = qSnap.docs
+            .filter((q) => q.data()?.isActive !== false)
+            .map((q) => mapQuestion(q.id, q.data()));
           break;
         }
 
@@ -566,7 +568,7 @@ export default function StudentCBTAttempt() {
           score += safeNumber(q.marks.correct, 0);
           correctCount += 1;
         } else {
-          score -= safeNumber(q.marks.incorrect, 0);
+          score -= Math.abs(safeNumber(q.marks.incorrect, 0));
           incorrectCount += 1;
         }
       } else {
@@ -574,7 +576,7 @@ export default function StudentCBTAttempt() {
           score += safeNumber(q.marks.correct, 0);
           correctCount += 1;
         } else {
-          score -= safeNumber(q.marks.incorrect, 0);
+          score -= Math.abs(safeNumber(q.marks.incorrect, 0));
           incorrectCount += 1;
         }
       }
