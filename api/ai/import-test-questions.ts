@@ -9,6 +9,7 @@ import {
 
 type ImportRequest = {
   pdfBase64?: string;
+  pdfText?: string;
   fileName?: string;
   testTitle?: string;
   subject?: string;
@@ -133,15 +134,23 @@ function buildBatches(segments: CandidateBlock[]) {
   return batches;
 }
 
+function normalizeClientText(input: string) {
+  return String(input || "")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const { pdfBase64, fileName, testTitle, subject } = (req.body || {}) as ImportRequest;
-    if (!pdfBase64) {
-      return res.status(400).json({ error: "Missing pdfBase64" });
+    const { pdfBase64, pdfText, fileName, testTitle, subject } = (req.body || {}) as ImportRequest;
+    if (!pdfText && !pdfBase64) {
+      return res.status(400).json({ error: "Missing pdfText or pdfBase64" });
     }
 
     const groqApiKey = process.env.GROQ_API_KEY;
@@ -150,12 +159,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: isDev ? "GROQ_API_KEY not configured" : "API configuration error" });
     }
 
-    const buffer = Buffer.from(pdfBase64, "base64");
-    if (!buffer.length) {
-      return res.status(400).json({ error: "Uploaded PDF is empty" });
+    let text = "";
+    let diagnostics: string[] = [];
+
+    if (typeof pdfText === "string" && pdfText.trim()) {
+      text = normalizeClientText(pdfText);
+      diagnostics.push("Used client-side PDF text extraction.");
+    } else {
+      const buffer = Buffer.from(String(pdfBase64 || ""), "base64");
+      if (!buffer.length) {
+        return res.status(400).json({ error: "Uploaded PDF is empty" });
+      }
+      const extracted = extractPdfText(buffer);
+      text = extracted.text;
+      diagnostics = extracted.diagnostics;
     }
 
-    const { text, diagnostics } = extractPdfText(buffer);
     if (!text) {
       return res.status(200).json({
         summary: { total: 0, ready: 0, partial: 0, rejected: 0 },

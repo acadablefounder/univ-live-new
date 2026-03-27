@@ -31,23 +31,110 @@ export type AiImportResponse = {
   };
 };
 
-export async function fileToBase64(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const slice = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...slice);
+type PdfJsTextItem = {
+  str?: string;
+  transform?: number[];
+  width?: number;
+};
+
+type PdfJsModule = {
+  getDocument: (src: { data: Uint8Array; useWorkerFetch?: boolean; isEvalSupported?: boolean }) => { promise: Promise<any> };
+  GlobalWorkerOptions: { workerSrc: string };
+};
+
+const PDFJS_VERSION = "4.10.38";
+const PDFJS_MODULE_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.mjs`;
+const PDFJS_WORKER_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+
+async function loadPdfJs(): Promise<PdfJsModule> {
+  const pdfjs = (await import(/* @vite-ignore */ PDFJS_MODULE_URL)) as unknown as PdfJsModule;
+  if (pdfjs?.GlobalWorkerOptions) {
+    pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
   }
-  return btoa(binary);
+  return pdfjs;
+}
+
+function normalizeLineText(input: string) {
+  return input
+    .replace(/\s+/g, " ")
+    .replace(/ ?([,:;!?])/g, "$1")
+    .trim();
+}
+
+function buildPageText(items: PdfJsTextItem[]) {
+  const positioned = items
+    .map((item) => {
+      const text = typeof item?.str === "string" ? item.str : "";
+      const transform = Array.isArray(item?.transform) ? item.transform : [];
+      const x = Number(transform[4] ?? 0);
+      const y = Number(transform[5] ?? 0);
+      return { text: normalizeLineText(text), x, y };
+    })
+    .filter((item) => item.text);
+
+  if (!positioned.length) return "";
+
+  positioned.sort((a, b) => {
+    if (Math.abs(b.y - a.y) > 2) return b.y - a.y;
+    return a.x - b.x;
+  });
+
+  const lineTolerance = 2.5;
+  const lines: Array<{ y: number; parts: Array<{ x: number; text: string }> }> = [];
+
+  for (const item of positioned) {
+    const current = lines[lines.length - 1];
+    if (!current || Math.abs(current.y - item.y) > lineTolerance) {
+      lines.push({ y: item.y, parts: [{ x: item.x, text: item.text }] });
+      continue;
+    }
+    current.parts.push({ x: item.x, text: item.text });
+  }
+
+  return lines
+    .map((line) =>
+      line.parts
+        .sort((a, b) => a.x - b.x)
+        .map((part) => part.text)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
+async function extractPdfTextWithPdfJs(file: File): Promise<string> {
+  const pdfjs = await loadPdfJs();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const loadingTask = pdfjs.getDocument({ data, useWorkerFetch: true, isEvalSupported: false });
+  const pdf = await loadingTask.promise;
+  const pages: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent();
+    const items = Array.isArray(textContent?.items) ? (textContent.items as PdfJsTextItem[]) : [];
+    const pageText = buildPageText(items);
+    if (pageText) pages.push(pageText);
+  }
+
+  return pages
+    .join("\n\n")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export async function importQuestionsFromPdf(
   file: File,
   context?: { testTitle?: string; subject?: string }
 ): Promise<AiImportResponse> {
-  const pdfBase64 = await fileToBase64(file);
+  const pdfText = await extractPdfTextWithPdfJs(file);
+  if (!pdfText) {
+    throw new Error("This PDF does not contain readable text. Scanned image PDFs are not supported in the current text-only importer.");
+  }
 
   const res = await fetch("/api/ai/import-test-questions", {
     method: "POST",
@@ -56,7 +143,7 @@ export async function importQuestionsFromPdf(
     },
     body: JSON.stringify({
       fileName: file.name,
-      pdfBase64,
+      pdfText,
       testTitle: context?.testTitle || "",
       subject: context?.subject || "",
     }),
