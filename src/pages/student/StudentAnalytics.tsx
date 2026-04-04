@@ -70,6 +70,7 @@ function toMillis(v: any): number {
   return Date.now();
 }
 
+// Percent Function
 function percent(score: any, maxScore: any) {
   const s = Number(score ?? 0);
   const m = Number(maxScore ?? 0);
@@ -172,7 +173,10 @@ export default function StudentAnalytics() {
             return { date: formatShortDate(ms), score: percent(a.score, a.maxScore) };
           })
           .reverse();
+        
 
+
+        /*****************************/
         // Subject Performance: avg % by subject (top 8 subjects)
         const bySub: Record<string, { total: number; count: number }> = {};
         for (const a of docs) {
