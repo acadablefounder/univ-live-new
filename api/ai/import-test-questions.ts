@@ -1,4 +1,16 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
+
+// ---------------------------------------------------------------------------
+// Vercel Serverless Config – raise body parser limit from default 1 MB to 10 MB
+// so that large Base64-encoded page images are accepted without a 413 error.
+// ---------------------------------------------------------------------------
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "10mb",
+    },
+  },
+};
 import {
   GoogleGenerativeAI,
   SchemaType,
