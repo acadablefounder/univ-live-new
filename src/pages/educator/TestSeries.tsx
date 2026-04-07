@@ -822,8 +822,8 @@ function QuestionsManager({
       toast.error("Please upload a PDF file only");
       return;
     }
-    if (file.size > 3 * 1024 * 1024) {
-      toast.error("Please upload a PDF up to 3 MB for AI import");
+    if (file.size > 15 * 1024 * 1024) {
+      toast.error("Please upload a PDF up to 15 MB for AI import");
       return;
     }
 
@@ -834,7 +834,13 @@ function QuestionsManager({
     setImportSummary(null);
 
     try {
-      const result = await importQuestionsFromPdf(file, { testTitle, subject: testSubject });
+      const result = await importQuestionsFromPdf(
+        file,
+        { testTitle, subject: testSubject, educatorId: educatorUid },
+        (completed, total) => {
+          toast.info(`Processing page ${completed} of ${total}...`, { id: "pdf-progress" });
+        }
+      );
       const previewItems: AiImportPreviewItem[] = (result.items || []).map((item) => ({
         ...item,
         include: item.status === "ready",
