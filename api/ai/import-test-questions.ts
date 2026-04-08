@@ -11,10 +11,11 @@ export const config = {
     },
   },
 };
-import {
-  GoogleGenerativeAI,
-  SchemaType,
-  type GenerationConfig,
+
+// NOTE: GoogleGenerativeAI is lazy-loaded to prevent module load crashes
+// Type imports are OK at top-level since they're erased at runtime
+import type {
+  GenerationConfig,
 } from "@google/generative-ai";
 import {
   normalizeImportedItem,
@@ -39,6 +40,8 @@ type ImportRequest = {
   /** Educator UID – used to namespace uploads in Firebase Storage */
   educatorId?: string;
 };
+
+
 
 type GeminiMcqItem = {
   sourceIndex: number;
@@ -87,56 +90,73 @@ async function getFirebaseAdmin() {
   return mod.getAdmin();
 }
 
-// ---------------------------------------------------------------------------
-// Gemini response schema – forces strict JSON output
-// ---------------------------------------------------------------------------
+let geminiLoader: Promise<any> | null = null;
 
-const mcqSchema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    items: {
-      type: SchemaType.ARRAY,
+async function getGeminiAI() {
+  if (!geminiLoader) {
+    geminiLoader = import("@google/generative-ai") as Promise<any>;
+  }
+  const mod = await geminiLoader;
+  return mod;
+}
+
+// Helper to get SchemaType from the Gemini module
+async function getSchemaType() {
+  const mod = await getGeminiAI();
+  return mod.SchemaType;
+}
+
+// Build MCQ response schema dynamically to avoid top-level async
+async function buildMcqSchema() {
+  const SchemaType = await getSchemaType();
+  
+  return {
+    type: SchemaType.OBJECT,
+    properties: {
       items: {
-        type: SchemaType.OBJECT,
-        properties: {
-          sourceIndex: { type: SchemaType.NUMBER },
-          status: {
-            type: SchemaType.STRING,
-            enum: ["ready", "partial", "rejected"],
+        type: SchemaType.ARRAY,
+        items: {
+          type: SchemaType.OBJECT,
+          properties: {
+            sourceIndex: { type: SchemaType.NUMBER },
+            status: {
+              type: SchemaType.STRING,
+              enum: ["ready", "partial", "rejected"],
+            },
+            question: { type: SchemaType.STRING },
+            options: {
+              type: SchemaType.ARRAY,
+              items: { type: SchemaType.STRING },
+            },
+            correctOption: { type: SchemaType.NUMBER, nullable: true },
+            reasons: {
+              type: SchemaType.ARRAY,
+              items: { type: SchemaType.STRING },
+            },
+            rawBlock: { type: SchemaType.STRING },
+            questionImageBox: {
+              type: SchemaType.ARRAY,
+              items: { type: SchemaType.NUMBER },
+              description:
+                "If a diagram/image/figure exists for this question, return bounding box " +
+                "[ymin, xmin, ymax, xmax] scaled 0-1000. Otherwise, empty array.",
+            },
           },
-          question: { type: SchemaType.STRING },
-          options: {
-            type: SchemaType.ARRAY,
-            items: { type: SchemaType.STRING },
-          },
-          correctOption: { type: SchemaType.NUMBER, nullable: true },
-          reasons: {
-            type: SchemaType.ARRAY,
-            items: { type: SchemaType.STRING },
-          },
-          rawBlock: { type: SchemaType.STRING },
-          questionImageBox: {
-            type: SchemaType.ARRAY,
-            items: { type: SchemaType.NUMBER },
-            description:
-              "If a diagram/image/figure exists for this question, return bounding box " +
-              "[ymin, xmin, ymax, xmax] scaled 0-1000. Otherwise, empty array.",
-          },
+          required: [
+            "sourceIndex",
+            "status",
+            "question",
+            "options",
+            "reasons",
+            "rawBlock",
+            "questionImageBox",
+          ],
         },
-        required: [
-          "sourceIndex",
-          "status",
-          "question",
-          "options",
-          "reasons",
-          "rawBlock",
-          "questionImageBox",
-        ],
       },
     },
-  },
-  required: ["items"],
-} as const;
+    required: ["items"],
+  } as const;
+}
 
 // ---------------------------------------------------------------------------
 // System prompt for Gemini
@@ -195,7 +215,12 @@ async function processWithGemini(
       throw new Error("GEMINI_MODEL is not configured");
     }
 
+    // Lazy-load GoogleGenerativeAI
+    const { GoogleGenerativeAI } = await getGeminiAI();
     const genAI = new GoogleGenerativeAI(apiKey);
+
+    // Build schema dynamically
+    const mcqSchema = await buildMcqSchema();
 
     const generationConfig: GenerationConfig = {
       temperature: 0.1,
