@@ -22,6 +22,7 @@ import {
   type ImportedQuestionItem,
 } from "../_lib/pdfQuestionImport.js";
 import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils";
+import ImageKit from "imagekit";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -78,32 +79,59 @@ const BBOX_PAD_PERCENT = 0.05;
 let sharpLoader: Promise<any> | null = null;
 
 async function getSharp() {
-  if (!sharpLoader) {
-    sharpLoader = import("sharp") as Promise<any>;
+  try {
+    if (!sharpLoader) {
+      console.log("[getSharp] Loading sharp module...");
+      sharpLoader = import("sharp") as Promise<any>;
+    }
+    const mod = await sharpLoader;
+    console.log("[getSharp] Sharp loaded successfully");
+    return mod?.default ?? mod;
+  } catch (err) {
+    console.error("[getSharp] Error loading sharp:", err);
+    throw err;
   }
-  const mod = await sharpLoader;
-  return mod?.default ?? mod;
 }
 
 async function getFirebaseAdmin() {
-  const mod = await import("../_lib/firebaseAdmin.js");
-  return mod.getAdmin();
+  try {
+    console.log("[getFirebaseAdmin] Loading Firebase admin...");
+    const mod = await import("../_lib/firebaseAdmin.js");
+    console.log("[getFirebaseAdmin] Firebase admin loaded successfully");
+    return mod.getAdmin();
+  } catch (err) {
+    console.error("[getFirebaseAdmin] Error loading Firebase admin:", err);
+    throw err;
+  }
 }
 
 let geminiLoader: Promise<any> | null = null;
 
 async function getGeminiAI() {
-  if (!geminiLoader) {
-    geminiLoader = import("@google/generative-ai") as Promise<any>;
+  try {
+    if (!geminiLoader) {
+      console.log("[getGeminiAI] Loading GoogleGenerativeAI module...");
+      geminiLoader = import("@google/generative-ai") as Promise<any>;
+    }
+    const mod = await geminiLoader;
+    console.log("[getGeminiAI] GoogleGenerativeAI loaded successfully");
+    return mod;
+  } catch (err) {
+    console.error("[getGeminiAI] Error loading GoogleGenerativeAI:", err);
+    throw err;
   }
-  const mod = await geminiLoader;
-  return mod;
 }
 
 // Helper to get SchemaType from the Gemini module
 async function getSchemaType() {
-  const mod = await getGeminiAI();
-  return mod.SchemaType;
+  try {
+    const mod = await getGeminiAI();
+    console.log("[getSchemaType] Getting SchemaType from Gemini...");
+    return mod.SchemaType;
+  } catch (err) {
+    console.error("[getSchemaType] Error getting SchemaType:", err);
+    throw err;
+  }
 }
 
 // Build MCQ response schema dynamically to avoid top-level async
@@ -216,11 +244,16 @@ async function processWithGemini(
     }
 
     // Lazy-load GoogleGenerativeAI
+    console.log("[processWithGemini] Loading GoogleGenerativeAI...");
     const { GoogleGenerativeAI } = await getGeminiAI();
+    console.log("[processWithGemini] GoogleGenerativeAI loaded successfully");
+    
     const genAI = new GoogleGenerativeAI(apiKey);
 
     // Build schema dynamically
+    console.log("[processWithGemini] Building schema...");
     const mcqSchema = await buildMcqSchema();
+    console.log("[processWithGemini] Schema built successfully");
 
     const generationConfig: GenerationConfig = {
       temperature: 0.1,
@@ -229,6 +262,7 @@ async function processWithGemini(
       responseSchema: mcqSchema as any, // SDK typing requires cast
     };
 
+    console.log(`[processWithGemini] Calling Gemini API with model: ${modelName}`);
     const model = genAI.getGenerativeModel({
       model: modelName,
       generationConfig,
@@ -256,7 +290,19 @@ async function processWithGemini(
       throw new Error("Gemini returned an empty response");
     }
 
-    const parsed = JSON.parse(text) as GeminiResponse;
+    // Log the response for debugging
+    console.log(`[processWithGemini] Raw response (first 500 chars): ${text.substring(0, 500)}`);
+    console.log(`[processWithGemini] Response length: ${text.length}`);
+
+    let parsed: GeminiResponse;
+    try {
+      parsed = JSON.parse(text) as GeminiResponse;
+    } catch (jsonErr) {
+      const jsonErr2 = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+      console.error(`[processWithGemini] JSON parsing error: ${jsonErr2}`);
+      console.error(`[processWithGemini] Attempted to parse: ${text.substring(0, 1000)}...`);
+      throw new Error(`Gemini returned invalid JSON: ${jsonErr2}. Response was: ${text.substring(0, 200)}`);
+    }
 
     // Validate the top-level shape
     if (!parsed || !Array.isArray(parsed.items)) {
@@ -265,10 +311,15 @@ async function processWithGemini(
       );
     }
 
+    console.log(`[processWithGemini] Successfully extracted ${parsed.items.length} items`);
     return parsed;
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : "Unknown error";
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : "No stack";
+    
     console.error(`[processWithGemini] Error:`, errorMsg);
+    console.error(`[processWithGemini] Stack:`, errorStack);
+    console.error(`[processWithGemini] Full error:`, err);
     
     // Re-throw with context
     if (errorMsg.includes("INVALID_ARGUMENT")) {
@@ -333,45 +384,51 @@ async function extractAndCropImage(
 }
 
 // ---------------------------------------------------------------------------
-// uploadToFirebase – uploads a cropped image buffer to Firebase Storage
+// uploadToImageKit – uploads a cropped image buffer to ImageKit
 // ---------------------------------------------------------------------------
 
-async function uploadToFirebase(
+async function uploadToImageKit(
   croppedBuffer: Buffer,
   questionId: string,
   educatorId?: string
 ): Promise<string> {
   try {
-    const admin = await getFirebaseAdmin();
-    const bucket = admin.storage().bucket();
+    const publicKey = process.env.IMAGEKIT_PUBLIC_KEY;
+    const privateKey = process.env.IMAGEKIT_PRIVATE_KEY;
+    const urlEndpoint = process.env.IMAGEKIT_URL_ENDPOINT;
 
-    if (!bucket) {
-      throw new Error("Firebase Storage bucket is not available");
+    if (!publicKey || !privateKey || !urlEndpoint) {
+      throw new Error("ImageKit credentials not configured");
     }
 
-    const prefix = educatorId
-      ? `question-images/${educatorId}`
-      : "question-images";
-    const filePath = `${prefix}/${questionId}.png`;
-
-    const file = bucket.file(filePath);
-
-    await file.save(croppedBuffer, {
-      metadata: {
-        contentType: "image/png",
-        cacheControl: "public, max-age=31536000",
-      },
-      public: true,
+    const imagekit = new ImageKit({
+      publicKey,
+      privateKey,
+      urlEndpoint,
     });
 
-    // Construct the public URL
-    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
-    return publicUrl;
+    const fileName = `q-${questionId}.png`;
+    const folder = educatorId ? `/question-diagrams/${educatorId}` : "/question-diagrams";
+
+    // Upload to ImageKit with buffer
+    const response = await imagekit.upload({
+      file: croppedBuffer,
+      fileName,
+      folder,
+      useUniqueFileName: true,
+      isPrivateFile: false,
+    });
+
+    console.log(
+      `[uploadToImageKit] Uploaded diagram for Q${questionId} → ${response.url}`
+    );
+
+    return response.url;
   } catch (err) {
-    const errorMsg = err instanceof Error ? err.message : "Unknown Firebase error";
-    console.error(`[uploadToFirebase] Error uploading ${questionId}:`, errorMsg);
+    const errorMsg = err instanceof Error ? err.message : "Unknown ImageKit error";
+    console.error(`[uploadToImageKit] Error uploading ${questionId}:`, errorMsg);
     // Re-throw to be handled by caller
-    throw new Error(`Failed to upload diagram: ${errorMsg}`);
+    throw new Error(`Failed to upload diagram to ImageKit: ${errorMsg}`);
   }
 }
 
@@ -391,6 +448,92 @@ function isValidBoundingBox(box: unknown): box is [number, number, number, numbe
 
   const [ymin, xmin, ymax, xmax] = box;
   return ymax > ymin && xmax > xmin;
+}
+
+// ---------------------------------------------------------------------------
+// Retry logic for transient API failures
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks if an error is retryable (503, 429, or network errors)
+ */
+function isRetryableError(err: any): boolean {
+  if (err?.status === 503) {
+    console.log("[retry] Detected 503 Service Unavailable – will retry");
+    return true; // Model overloaded
+  }
+  if (err?.status === 429) {
+    console.log("[retry] Detected 429 Too Many Requests – will retry");
+    return true; // Rate limited
+  }
+  if (err?.status === 502 || err?.status === 504) {
+    console.log(`[retry] Detected ${err.status} gateway error – will retry`);
+    return true; // Bad Gateway, Gateway Timeout
+  }
+  // Check for network timeouts or connection errors
+  const errorMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  if (errorMsg.includes("econnrefused") || errorMsg.includes("timeout")) {
+    console.log("[retry] Detected network error – will retry");
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Delays execution by given milliseconds
+ */
+function delayMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Retries processWithGemini with exponential backoff for transient failures
+ */
+async function processWithGeminiRetry(
+  imageBuffer: Buffer,
+  mimeType: string,
+  context: { testTitle?: string; subject?: string }
+): Promise<GeminiResponse> {
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+  let lastError: any = null;
+  let backoffMs = 1000; // Start with 1 second
+
+  while (attempt < MAX_RETRIES) {
+    try {
+      if (attempt > 0) {
+        console.log(`[retry] Attempt ${attempt + 1}/${MAX_RETRIES} after ${backoffMs}ms delay`);
+        await delayMs(backoffMs);
+      }
+
+      return await processWithGemini(imageBuffer, mimeType, context);
+    } catch (err) {
+      lastError = err;
+      
+      if (!isRetryableError(err)) {
+        // Not a retryable error, throw immediately
+        console.log("[retry] Error is not retryable, failing immediately");
+        throw err;
+      }
+
+      attempt++;
+      if (attempt >= MAX_RETRIES) {
+        console.error(`[retry] Failed after ${MAX_RETRIES} attempts`);
+        throw new Error(
+          `Gemini API unavailable after ${MAX_RETRIES} retries. ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
+
+      // Calculate backoff for next attempt (exponential: 1s → 2s → 4s)
+      backoffMs = Math.min(backoffMs * 2, 8000); // Cap at 8 seconds
+      const jitter = Math.random() * 0.1 * backoffMs; // ±10% jitter
+      backoffMs = Math.round(backoffMs + jitter);
+    }
+  }
+
+  throw lastError || new Error("Gemini API request failed after retries");
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +603,7 @@ export default async function handler(
       message: "Extracting MCQ questions with AI...",
     });
 
-    const geminiResult = await processWithGemini(imageBuffer, mimeType, {
+    const geminiResult = await processWithGeminiRetry(imageBuffer, mimeType, {
       testTitle,
       subject,
     });
@@ -511,7 +654,7 @@ export default async function handler(
             const cropped = await extractAndCropImage(imageBuffer, box);
 
             const uniqueId = `p${pageNumber || 0}_q${normalized.sourceIndex}_${Date.now()}`;
-            questionImageUrl = await uploadToFirebase(
+            questionImageUrl = await uploadToImageKit(
               cropped,
               uniqueId,
               educatorId
@@ -593,7 +736,15 @@ export default async function handler(
 
     endStreaming(res);
   } catch (error) {
-    console.error("[import-test-questions] Unhandled error:", error);
+    // Log detailed error info for debugging
+    const errorDetails = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : "No stack trace";
+    
+    console.error("[import-test-questions] Unhandled error:");
+    console.error("  Message:", errorDetails);
+    console.error("  Stack:", errorStack);
+    console.error("  Full error:", error);
+    
     try {
       streamError(res, error);
     } catch (streamErr) {
