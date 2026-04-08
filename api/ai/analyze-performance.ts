@@ -395,6 +395,11 @@ export default async function handler(
     endStreaming(res);
   } catch (error) {
     console.error("[analyze-performance] Unhandled error:", error);
-    streamError(res, error);
+    try {
+      streamError(res, error);
+    } catch (streamErr) {
+      console.error("[analyze-performance] Failed to send error response:", streamErr);
+      // Response is likely already closed, just log it
+    }
   }
 }
