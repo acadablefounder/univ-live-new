@@ -1,15 +1,28 @@
 import { VercelRequest, VercelResponse } from "@vercel/node";
-import {
-  GoogleGenerativeAI,
-  SchemaType,
-  type GenerationConfig,
+
+// ---------------------------------------------------------------------------
+// Vercel Serverless Config – raise body parser limit from default 1 MB to 10 MB
+// so that large Base64-encoded page images are accepted without a 413 error.
+// ---------------------------------------------------------------------------
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "10mb",
+    },
+  },
+};
+
+// NOTE: GoogleGenerativeAI is lazy-loaded to prevent module load crashes
+// Type imports are OK at top-level since they're erased at runtime
+import type {
+  GenerationConfig,
 } from "@google/generative-ai";
-import sharp from "sharp";
-import { getAdmin } from "../_lib/firebaseAdmin.js";
 import {
   normalizeImportedItem,
   type ImportedQuestionItem,
 } from "../_lib/pdfQuestionImport.js";
+import { initializeStreaming, sendStreamEvent, endStreaming, streamError } from "../_lib/aiStreamingUtils.js";
+import ImageKit from "imagekit";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +41,8 @@ type ImportRequest = {
   /** Educator UID – used to namespace uploads in Firebase Storage */
   educatorId?: string;
 };
+
+
 
 type GeminiMcqItem = {
   sourceIndex: number;
@@ -61,56 +76,115 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 /** Padding percentage applied to each side of a bounding box crop */
 const BBOX_PAD_PERCENT = 0.05;
 
-// ---------------------------------------------------------------------------
-// Gemini response schema – forces strict JSON output
-// ---------------------------------------------------------------------------
+let sharpLoader: Promise<any> | null = null;
 
-const mcqSchema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    items: {
-      type: SchemaType.ARRAY,
+async function getSharp() {
+  try {
+    if (!sharpLoader) {
+      console.log("[getSharp] Loading sharp module...");
+      sharpLoader = import("sharp") as Promise<any>;
+    }
+    const mod = await sharpLoader;
+    console.log("[getSharp] Sharp loaded successfully");
+    return mod?.default ?? mod;
+  } catch (err) {
+    console.error("[getSharp] Error loading sharp:", err);
+    throw err;
+  }
+}
+
+async function getFirebaseAdmin() {
+  try {
+    console.log("[getFirebaseAdmin] Loading Firebase admin...");
+    const mod = await import("../_lib/firebaseAdmin.js");
+    console.log("[getFirebaseAdmin] Firebase admin loaded successfully");
+    return mod.getAdmin();
+  } catch (err) {
+    console.error("[getFirebaseAdmin] Error loading Firebase admin:", err);
+    throw err;
+  }
+}
+
+let geminiLoader: Promise<any> | null = null;
+
+async function getGeminiAI() {
+  try {
+    if (!geminiLoader) {
+      console.log("[getGeminiAI] Loading GoogleGenerativeAI module...");
+      geminiLoader = import("@google/generative-ai") as Promise<any>;
+    }
+    const mod = await geminiLoader;
+    console.log("[getGeminiAI] GoogleGenerativeAI loaded successfully");
+    return mod;
+  } catch (err) {
+    console.error("[getGeminiAI] Error loading GoogleGenerativeAI:", err);
+    throw err;
+  }
+}
+
+// Helper to get SchemaType from the Gemini module
+async function getSchemaType() {
+  try {
+    const mod = await getGeminiAI();
+    console.log("[getSchemaType] Getting SchemaType from Gemini...");
+    return mod.SchemaType;
+  } catch (err) {
+    console.error("[getSchemaType] Error getting SchemaType:", err);
+    throw err;
+  }
+}
+
+// Build MCQ response schema dynamically to avoid top-level async
+async function buildMcqSchema() {
+  const SchemaType = await getSchemaType();
+  
+  return {
+    type: SchemaType.OBJECT,
+    properties: {
       items: {
-        type: SchemaType.OBJECT,
-        properties: {
-          sourceIndex: { type: SchemaType.NUMBER },
-          status: {
-            type: SchemaType.STRING,
-            enum: ["ready", "partial", "rejected"],
+        type: SchemaType.ARRAY,
+        items: {
+          type: SchemaType.OBJECT,
+          properties: {
+            sourceIndex: { type: SchemaType.NUMBER },
+            status: {
+              type: SchemaType.STRING,
+              enum: ["ready", "partial", "rejected"],
+            },
+            question: { type: SchemaType.STRING },
+            options: {
+              type: SchemaType.ARRAY,
+              items: { type: SchemaType.STRING },
+            },
+            correctOption: { type: SchemaType.NUMBER, nullable: true },
+            reasons: {
+              type: SchemaType.ARRAY,
+              items: { type: SchemaType.STRING },
+            },
+            rawBlock: { type: SchemaType.STRING },
+            questionImageBox: {
+              type: SchemaType.ARRAY,
+              items: { type: SchemaType.NUMBER },
+              description:
+                "If a diagram/image/figure exists for this question, return bounding box " +
+                "[ymin, xmin, ymax, xmax] scaled 0-1000. Otherwise, empty array.",
+            },
           },
-          question: { type: SchemaType.STRING },
-          options: {
-            type: SchemaType.ARRAY,
-            items: { type: SchemaType.STRING },
-          },
-          correctOption: { type: SchemaType.NUMBER, nullable: true },
-          reasons: {
-            type: SchemaType.ARRAY,
-            items: { type: SchemaType.STRING },
-          },
-          rawBlock: { type: SchemaType.STRING },
-          questionImageBox: {
-            type: SchemaType.ARRAY,
-            items: { type: SchemaType.NUMBER },
-            description:
-              "If a diagram/image/figure exists for this question, return bounding box " +
-              "[ymin, xmin, ymax, xmax] scaled 0-1000. Otherwise, empty array.",
-          },
+          required: [
+            "sourceIndex",
+            "status",
+            "question",
+            "options",
+            "reasons",
+            "rawBlock",
+            "questionImageBox",
+          ],
         },
-        required: [
-          "sourceIndex",
-          "status",
-          "question",
-          "options",
-          "reasons",
-          "rawBlock",
-          "questionImageBox",
-        ],
       },
     },
-  },
-  required: ["items"],
-} as const;
+    required: ["items"],
+  } as const;
+}
 
 // ---------------------------------------------------------------------------
 // System prompt for Gemini
@@ -158,57 +232,101 @@ async function processWithGemini(
   mimeType: string,
   context: { testTitle?: string; subject?: string }
 ): Promise<GeminiResponse> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("GEMINI_API_KEY is not configured");
-  }
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not configured");
+    }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
+    const modelName = process.env.GEMINI_MODEL || "gemini-1.5-flash";
+    if (!modelName) {
+      throw new Error("GEMINI_MODEL is not configured");
+    }
 
-  const generationConfig: GenerationConfig = {
-    temperature: 0.1,
-    maxOutputTokens: 8192,
-    responseMimeType: "application/json",
-    responseSchema: mcqSchema as any, // SDK typing requires cast
-  };
+    // Lazy-load GoogleGenerativeAI
+    console.log("[processWithGemini] Loading GoogleGenerativeAI...");
+    const { GoogleGenerativeAI } = await getGeminiAI();
+    console.log("[processWithGemini] GoogleGenerativeAI loaded successfully");
+    
+    const genAI = new GoogleGenerativeAI(apiKey);
 
-  const model = genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
-    generationConfig,
-    systemInstruction: buildSystemInstruction(context),
-  });
+    // Build schema dynamically
+    console.log("[processWithGemini] Building schema...");
+    const mcqSchema = await buildMcqSchema();
+    console.log("[processWithGemini] Schema built successfully");
 
-  // Build the multimodal content parts
-  const imagePart = {
-    inlineData: {
-      data: imageBuffer.toString("base64"),
-      mimeType,
-    },
-  };
+    const generationConfig: GenerationConfig = {
+      temperature: 0.1,
+      maxOutputTokens: 8192,
+      responseMimeType: "application/json",
+      responseSchema: mcqSchema as any, // SDK typing requires cast
+    };
 
-  const result = await model.generateContent([
-    "Extract all MCQs from this exam page image. " +
+    console.log(`[processWithGemini] Calling Gemini API with model: ${modelName}`);
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      generationConfig,
+      systemInstruction: buildSystemInstruction(context),
+    });
+
+    // Build the multimodal content parts
+    const imagePart = {
+      inlineData: {
+        data: imageBuffer.toString("base64"),
+        mimeType,
+      },
+    };
+
+    const result = await model.generateContent([
+      "Extract all MCQs from this exam page image. " +
       "For any question that has an associated diagram, figure, or graph, " +
       "return its bounding box in questionImageBox. " +
       "Return the results as structured JSON.",
-    imagePart,
-  ]);
+      imagePart,
+    ]);
 
-  const text = result.response.text();
-  if (!text) {
-    throw new Error("Gemini returned an empty response");
+    const text = result.response.text();
+    if (!text) {
+      throw new Error("Gemini returned an empty response");
+    }
+
+    // Log the response for debugging
+    console.log(`[processWithGemini] Raw response (first 500 chars): ${text.substring(0, 500)}`);
+    console.log(`[processWithGemini] Response length: ${text.length}`);
+
+    let parsed: GeminiResponse;
+    try {
+      parsed = JSON.parse(text) as GeminiResponse;
+    } catch (jsonErr) {
+      const jsonErr2 = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
+      console.error(`[processWithGemini] JSON parsing error: ${jsonErr2}`);
+      console.error(`[processWithGemini] Attempted to parse: ${text.substring(0, 1000)}...`);
+      throw new Error(`Gemini returned invalid JSON: ${jsonErr2}. Response was: ${text.substring(0, 200)}`);
+    }
+
+    // Validate the top-level shape
+    if (!parsed || !Array.isArray(parsed.items)) {
+      throw new Error(
+        "Gemini response did not match expected schema (missing 'items' array)"
+      );
+    }
+
+    console.log(`[processWithGemini] Successfully extracted ${parsed.items.length} items`);
+    return parsed;
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    const errorStack = err instanceof Error ? err.stack : "No stack";
+    
+    console.error(`[processWithGemini] Error:`, errorMsg);
+    console.error(`[processWithGemini] Stack:`, errorStack);
+    console.error(`[processWithGemini] Full error:`, err);
+    
+    // Re-throw with context
+    if (errorMsg.includes("INVALID_ARGUMENT")) {
+      throw new Error("Invalid PDF image sent to AI service. Please try a clearer image.");
+    }
+    throw err;
   }
-
-  const parsed = JSON.parse(text) as GeminiResponse;
-
-  // Validate the top-level shape
-  if (!parsed || !Array.isArray(parsed.items)) {
-    throw new Error(
-      "Gemini response did not match expected schema (missing 'items' array)"
-    );
-  }
-
-  return parsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,67 +337,99 @@ async function extractAndCropImage(
   originalImageBuffer: Buffer,
   geminiBox: number[] // [ymin, xmin, ymax, xmax] in 0..1000
 ): Promise<Buffer> {
-  const metadata = await sharp(originalImageBuffer).metadata();
-  const imgWidth = metadata.width ?? 1;
-  const imgHeight = metadata.height ?? 1;
+  try {
+    if (!originalImageBuffer || originalImageBuffer.length === 0) {
+      throw new Error("Original image buffer is empty");
+    }
 
-  const [ymin, xmin, ymax, xmax] = geminiBox;
+    const sharp = await getSharp();
+    const metadata = await sharp(originalImageBuffer).metadata();
+    const imgWidth = metadata.width ?? 1;
+    const imgHeight = metadata.height ?? 1;
 
-  // Map from Gemini's 1000×1000 grid to actual pixel coordinates
-  // Apply padding to avoid clipping edges of diagrams
-  const padX = (xmax - xmin) * BBOX_PAD_PERCENT;
-  const padY = (ymax - ymin) * BBOX_PAD_PERCENT;
+    if (imgWidth < 1 || imgHeight < 1) {
+      throw new Error("Invalid image dimensions");
+    }
 
-  const left = Math.max(0, Math.round(((xmin - padX) / 1000) * imgWidth));
-  const top = Math.max(0, Math.round(((ymin - padY) / 1000) * imgHeight));
-  const right = Math.min(
-    imgWidth,
-    Math.round(((xmax + padX) / 1000) * imgWidth)
-  );
-  const bottom = Math.min(
-    imgHeight,
-    Math.round(((ymax + padY) / 1000) * imgHeight)
-  );
+    const [ymin, xmin, ymax, xmax] = geminiBox;
 
-  const cropWidth = Math.max(1, right - left);
-  const cropHeight = Math.max(1, bottom - top);
+    // Map from Gemini's 1000×1000 grid to actual pixel coordinates
+    // Apply padding to avoid clipping edges of diagrams
+    const padX = (xmax - xmin) * BBOX_PAD_PERCENT;
+    const padY = (ymax - ymin) * BBOX_PAD_PERCENT;
 
-  return sharp(originalImageBuffer)
-    .extract({ left, top, width: cropWidth, height: cropHeight })
-    .png()
-    .toBuffer();
+    const left = Math.max(0, Math.round(((xmin - padX) / 1000) * imgWidth));
+    const top = Math.max(0, Math.round(((ymin - padY) / 1000) * imgHeight));
+    const right = Math.min(
+      imgWidth,
+      Math.round(((xmax + padX) / 1000) * imgWidth)
+    );
+    const bottom = Math.min(
+      imgHeight,
+      Math.round(((ymax + padY) / 1000) * imgHeight)
+    );
+
+    const cropWidth = Math.max(1, right - left);
+    const cropHeight = Math.max(1, bottom - top);
+
+    return await sharp(originalImageBuffer)
+      .extract({ left, top, width: cropWidth, height: cropHeight })
+      .png()
+      .toBuffer();
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Unknown error";
+    console.error(`[extractAndCropImage] Error cropping image:`, errorMsg);
+    throw new Error(`Failed to crop diagram from PDF: ${errorMsg}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// uploadToFirebase – uploads a cropped image buffer to Firebase Storage
+// uploadToImageKit – uploads a cropped image buffer to ImageKit
 // ---------------------------------------------------------------------------
 
-async function uploadToFirebase(
+async function uploadToImageKit(
   croppedBuffer: Buffer,
   questionId: string,
   educatorId?: string
 ): Promise<string> {
-  const admin = getAdmin();
-  const bucket = admin.storage().bucket();
+  try {
+    const publicKey = process.env.IMAGEKIT_PUBLIC_KEY;
+    const privateKey = process.env.IMAGEKIT_PRIVATE_KEY;
+    const urlEndpoint = process.env.IMAGEKIT_URL_ENDPOINT;
 
-  const prefix = educatorId
-    ? `question-images/${educatorId}`
-    : "question-images";
-  const filePath = `${prefix}/${questionId}.png`;
+    if (!publicKey || !privateKey || !urlEndpoint) {
+      throw new Error("ImageKit credentials not configured");
+    }
 
-  const file = bucket.file(filePath);
+    const imagekit = new ImageKit({
+      publicKey,
+      privateKey,
+      urlEndpoint,
+    });
 
-  await file.save(croppedBuffer, {
-    metadata: {
-      contentType: "image/png",
-      cacheControl: "public, max-age=31536000",
-    },
-    public: true,
-  });
+    const fileName = `q-${questionId}.png`;
+    const folder = educatorId ? `/question-diagrams/${educatorId}` : "/question-diagrams";
 
-  // Construct the public URL
-  const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
-  return publicUrl;
+    // Upload to ImageKit with buffer
+    const response = await imagekit.upload({
+      file: croppedBuffer,
+      fileName,
+      folder,
+      useUniqueFileName: true,
+      isPrivateFile: false,
+    });
+
+    console.log(
+      `[uploadToImageKit] Uploaded diagram for Q${questionId} → ${response.url}`
+    );
+
+    return response.url;
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : "Unknown ImageKit error";
+    console.error(`[uploadToImageKit] Error uploading ${questionId}:`, errorMsg);
+    // Re-throw to be handled by caller
+    throw new Error(`Failed to upload diagram to ImageKit: ${errorMsg}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +451,92 @@ function isValidBoundingBox(box: unknown): box is [number, number, number, numbe
 }
 
 // ---------------------------------------------------------------------------
+// Retry logic for transient API failures
+// ---------------------------------------------------------------------------
+
+/**
+ * Checks if an error is retryable (503, 429, or network errors)
+ */
+function isRetryableError(err: any): boolean {
+  if (err?.status === 503) {
+    console.log("[retry] Detected 503 Service Unavailable – will retry");
+    return true; // Model overloaded
+  }
+  if (err?.status === 429) {
+    console.log("[retry] Detected 429 Too Many Requests – will retry");
+    return true; // Rate limited
+  }
+  if (err?.status === 502 || err?.status === 504) {
+    console.log(`[retry] Detected ${err.status} gateway error – will retry`);
+    return true; // Bad Gateway, Gateway Timeout
+  }
+  // Check for network timeouts or connection errors
+  const errorMsg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  if (errorMsg.includes("econnrefused") || errorMsg.includes("timeout")) {
+    console.log("[retry] Detected network error – will retry");
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Delays execution by given milliseconds
+ */
+function delayMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Retries processWithGemini with exponential backoff for transient failures
+ */
+async function processWithGeminiRetry(
+  imageBuffer: Buffer,
+  mimeType: string,
+  context: { testTitle?: string; subject?: string }
+): Promise<GeminiResponse> {
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+  let lastError: any = null;
+  let backoffMs = 1000; // Start with 1 second
+
+  while (attempt < MAX_RETRIES) {
+    try {
+      if (attempt > 0) {
+        console.log(`[retry] Attempt ${attempt + 1}/${MAX_RETRIES} after ${backoffMs}ms delay`);
+        await delayMs(backoffMs);
+      }
+
+      return await processWithGemini(imageBuffer, mimeType, context);
+    } catch (err) {
+      lastError = err;
+      
+      if (!isRetryableError(err)) {
+        // Not a retryable error, throw immediately
+        console.log("[retry] Error is not retryable, failing immediately");
+        throw err;
+      }
+
+      attempt++;
+      if (attempt >= MAX_RETRIES) {
+        console.error(`[retry] Failed after ${MAX_RETRIES} attempts`);
+        throw new Error(
+          `Gemini API unavailable after ${MAX_RETRIES} retries. ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
+
+      // Calculate backoff for next attempt (exponential: 1s → 2s → 4s)
+      backoffMs = Math.min(backoffMs * 2, 8000); // Cap at 8 seconds
+      const jitter = Math.random() * 0.1 * backoffMs; // ±10% jitter
+      backoffMs = Math.round(backoffMs + jitter);
+    }
+  }
+
+  throw lastError || new Error("Gemini API request failed after retries");
+}
+
+// ---------------------------------------------------------------------------
 // Main Vercel handler
 // ---------------------------------------------------------------------------
 
@@ -313,9 +549,10 @@ export default async function handler(
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const isDev = process.env.NODE_ENV !== "production";
-
   try {
+    // Initialize streaming response
+    initializeStreaming(res);
+
     const {
       imageBase64,
       imageMimeType,
@@ -328,38 +565,32 @@ export default async function handler(
 
     // ---- Input Validation ----
     if (!imageBase64) {
-      return res.status(400).json({
-        error:
-          "Missing required field: imageBase64 (Base64-encoded page image)",
-      });
+      return streamError(res, new Error("imageBase64 is required"));
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: isDev
-          ? "GEMINI_API_KEY not configured. Add it to Vercel environment variables."
-          : "API configuration error",
-      });
+      return streamError(res, new Error("GEMINI_API_KEY is not configured"));
     }
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Processing page ${pageNumber || "unknown"} from ${fileName || "PDF document"}...`,
+    });
 
     // Validate MIME type
     const mimeType = imageMimeType || "image/png";
     if (!ALLOWED_MIME_TYPES.has(mimeType)) {
-      return res.status(400).json({
-        error: `Unsupported image MIME type: ${mimeType}. Allowed: ${[...ALLOWED_MIME_TYPES].join(", ")}`,
-      });
+      return streamError(res, new Error(`Unsupported image MIME type: ${mimeType}`));
     }
 
     // Decode the incoming image
     const imageBuffer = Buffer.from(imageBase64, "base64");
     if (!imageBuffer.length) {
-      return res.status(400).json({ error: "Uploaded image is empty" });
+      return streamError(res, new Error("Uploaded image is empty"));
     }
 
     if (imageBuffer.length > MAX_IMAGE_BYTES) {
-      return res.status(400).json({
-        error: `Image too large (${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`,
-      });
+      return streamError(res, new Error(`Image too large (${(imageBuffer.length / 1024 / 1024).toFixed(1)} MB)`));
     }
 
     // ---- Step 1: Gemini Extraction ----
@@ -367,7 +598,12 @@ export default async function handler(
       `[import-test-questions] Processing page ${pageNumber || "?"} of "${fileName || "unknown"}" (${(imageBuffer.length / 1024).toFixed(0)} KB)`
     );
 
-    const geminiResult = await processWithGemini(imageBuffer, mimeType, {
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Extracting MCQ questions with AI...",
+    });
+
+    const geminiResult = await processWithGeminiRetry(imageBuffer, mimeType, {
       testTitle,
       subject,
     });
@@ -381,16 +617,26 @@ export default async function handler(
     );
 
     if (!rawItems.length) {
-      return res.status(200).json({
-        summary: { total: 0, ready: 0, partial: 0, rejected: 0 },
-        items: [],
-        meta: {
-          fileName,
-          pageNumber,
-          diagnostics: ["No MCQ questions were detected on this page."],
+      sendStreamEvent(res, {
+        type: "complete",
+        data: {
+          summary: { total: 0, ready: 0, partial: 0, rejected: 0 },
+          items: [],
+          meta: {
+            fileName,
+            pageNumber,
+            diagnostics: ["No MCQ questions were detected on this page."],
+          },
         },
       });
+      endStreaming(res);
+      return;
     }
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: `Found ${rawItems.length} questions. Processing diagrams...`,
+    });
 
     // ---- Step 2: Normalize + Crop + Upload diagrams concurrently ----
     const processedItems: (ImportedQuestionItem & {
@@ -408,7 +654,7 @@ export default async function handler(
             const cropped = await extractAndCropImage(imageBuffer, box);
 
             const uniqueId = `p${pageNumber || 0}_q${normalized.sourceIndex}_${Date.now()}`;
-            questionImageUrl = await uploadToFirebase(
+            questionImageUrl = await uploadToImageKit(
               cropped,
               uniqueId,
               educatorId
@@ -432,6 +678,11 @@ export default async function handler(
         };
       })
     );
+
+    sendStreamEvent(res, {
+      type: "progress",
+      message: "Finalizing results...",
+    });
 
     // ---- Step 3: De-duplicate ----
     const unique = processedItems.filter((item, index, arr) => {
@@ -464,25 +715,41 @@ export default async function handler(
       `[import-test-questions] Final: ${summary.total} questions (${summary.ready} ready, ${summary.partial} partial, ${summary.rejected} rejected)`
     );
 
-    return res.status(200).json({
-      summary,
-      items: unique,
-      meta: {
-        fileName,
-        pageNumber,
-        itemCount: unique.length,
-        diagnostics: [
-          `Gemini extracted ${rawItems.length} candidate(s) from page image.`,
-          unique.length !== rawItems.length
-            ? `${rawItems.length - unique.length} duplicate(s) removed.`
-            : null,
-        ].filter(Boolean),
+    sendStreamEvent(res, {
+      type: "complete",
+      data: {
+        summary,
+        items: unique,
+        meta: {
+          fileName,
+          pageNumber,
+          itemCount: unique.length,
+          diagnostics: [
+            `Gemini extracted ${rawItems.length} candidate(s) from page image.`,
+            unique.length !== rawItems.length
+              ? `${rawItems.length - unique.length} duplicate(s) removed.`
+              : null,
+          ].filter(Boolean),
+        },
       },
     });
+
+    endStreaming(res);
   } catch (error) {
-    console.error("[import-test-questions] Unhandled error:", error);
-    return res.status(500).json({
-      error: isDev ? String(error) : "Internal server error",
-    });
+    // Log detailed error info for debugging
+    const errorDetails = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : "No stack trace";
+    
+    console.error("[import-test-questions] Unhandled error:");
+    console.error("  Message:", errorDetails);
+    console.error("  Stack:", errorStack);
+    console.error("  Full error:", error);
+    
+    try {
+      streamError(res, error);
+    } catch (streamErr) {
+      console.error("[import-test-questions] Failed to send error response:", streamErr);
+      // Response is likely already closed, just log it
+    }
   }
 }

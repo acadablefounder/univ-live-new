@@ -86,8 +86,9 @@ const buildInitResponses = (qs: AttemptQuestion[]) => {
 const mapQuestion = (id: string, data: any): AttemptQuestion => {
   const opts: string[] = Array.isArray(data.options) ? data.options : [];
   const correctIndex = safeNumber(data.correctOption, 0);
-  const positive = safeNumber(data.marks, 5);
-  const negative = Math.abs(safeNumber(data.negativeMarks, 1));
+  // Always normalize to +5 marks and -1 negative marks
+  const positive = 5;
+  const negative = 1;
 
   return {
     id,
