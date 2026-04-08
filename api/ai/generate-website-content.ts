@@ -329,6 +329,11 @@ export default async function handler(
     endStreaming(res);
   } catch (error) {
     console.error("[generate-website-content] Unhandled error:", error);
-    streamError(res, error);
+    try {
+      streamError(res, error);
+    } catch (streamErr) {
+      console.error("[generate-website-content] Failed to send error response:", streamErr);
+      // Response is likely already closed, just log it
+    }
   }
 }
