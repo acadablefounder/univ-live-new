@@ -3,6 +3,12 @@ import { auth } from "@/lib/firebase";
 
 export type ImageKitScope = "question-bank" | "website";
 
+type ImageKitAuthParams = {
+  token: string;
+  expire: number;
+  signature: string;
+};
+
 function getIdToken(forceRefresh: boolean = false): Promise<string> {
   return new Promise((resolve, reject) => {
     // onAuthStateChanged ensures we wait for Firebase to initialize on app launch
@@ -38,62 +44,68 @@ export async function uploadToImageKit(
 
   const idToken = await getIdToken();
 
-  // IMPORTANT: Fetch fresh auth params for every upload
-  const url = `/api/imagekit-auth?scope=${encodeURIComponent(scope)}`;
-  console.log(`[uploadToImageKit] Requesting auth from: ${url}`);
-  
-  const authRes = await fetch(url, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${idToken}` },
-  });
+  async function fetchAuthParams(authScope: ImageKitScope): Promise<ImageKitAuthParams> {
+    const url = `/api/imagekit-auth?scope=${encodeURIComponent(authScope)}`;
+    console.log(`[uploadToImageKit] Requesting auth from: ${url}`);
 
-  console.log(`[uploadToImageKit] Auth response status: ${authRes.status}`);
-  console.log(`[uploadToImageKit] Auth response headers:`, {
-    contentType: authRes.headers.get("content-type"),
-    contentLength: authRes.headers.get("content-length"),
-  });
+    const authRes = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
 
-  if (!authRes.ok) {
-    let errorText = "";
-    try {
-      errorText = await authRes.text();
-      console.error(`[uploadToImageKit] Auth error response text (${authRes.status}):`, errorText);
-      
-      // Try to parse as JSON first
+    const rawText = await authRes.text();
+    console.log(`[uploadToImageKit] Auth response status (${authScope}): ${authRes.status}`);
+    console.log(`[uploadToImageKit] Auth response headers (${authScope}):`, {
+      contentType: authRes.headers.get("content-type"),
+      contentLength: authRes.headers.get("content-length"),
+    });
+
+    if (!authRes.ok) {
+      let parsedError = rawText;
       try {
-        const json = JSON.parse(errorText);
-        throw new Error(`ImageKit auth failed: ${json.error || errorText}`);
-      } catch (jsonErr) {
-        // If not JSON, throw the raw text
-        if (errorText.length > 500) {
-          throw new Error(`ImageKit auth failed: ${authRes.status} - ${errorText.substring(0, 200)}...`);
-        } else {
-          throw new Error(`ImageKit auth failed: ${authRes.status} - ${errorText}`);
-        }
+        const json = JSON.parse(rawText);
+        parsedError = String(json?.error || rawText);
+      } catch {
+        // Keep raw response text when it is not JSON.
       }
-    } catch (e: any) {
-      // If we couldn't even read the response, give generic error
-      throw new Error(`ImageKit auth failed: ${authRes.status} ${authRes.statusText} (check server logs)`);
+
+      const shortError = parsedError.length > 250 ? `${parsedError.substring(0, 250)}...` : parsedError;
+      throw new Error(`ImageKit auth failed (${authScope}) [${authRes.status}]: ${shortError}`);
     }
+
+    console.log(`[uploadToImageKit] Auth response (${authScope}, first 200 chars):`, rawText.substring(0, 200));
+    let parsed: ImageKitAuthParams;
+    try {
+      parsed = JSON.parse(rawText) as ImageKitAuthParams;
+    } catch (parseErr: any) {
+      const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+      throw new Error(`Invalid auth response format (${authScope}): ${parseMsg}`);
+    }
+
+    if (!parsed?.token || !parsed?.signature || typeof parsed?.expire !== "number") {
+      throw new Error(`Invalid auth payload (${authScope}): missing token/signature/expire`);
+    }
+
+    console.log(`[uploadToImageKit] ✅ Auth params received successfully (${authScope})`);
+    return parsed;
   }
 
-  let authParams;
+  let authParams: ImageKitAuthParams;
   try {
-    const rawText = await authRes.text();
-    console.log(`[uploadToImageKit] Auth response (first 200 chars):`, rawText.substring(0, 200));
-    
-    authParams = JSON.parse(rawText) as {
-      token: string;
-      expire: number;
-      signature: string;
-    };
-    
-    console.log(`[uploadToImageKit] ✅ Auth params received successfully`);
-  } catch (parseErr: any) {
-    const parseMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
-    console.error("[uploadToImageKit] Failed to parse auth response:", parseMsg);
-    console.error("[uploadToImageKit] Response was:", await authRes.clone().text());
-    throw new Error(`Invalid auth response format: ${parseMsg}`);
+    authParams = await fetchAuthParams(scope);
+  } catch (err: any) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const shouldFallback =
+      scope === "question-bank" &&
+      (msg.includes("[403]") || msg.toLowerCase().includes("forbidden"));
+
+    if (!shouldFallback) {
+      throw err;
+    }
+
+    // Some educator paths may still call the default scope; retry with educator-allowed scope.
+    console.warn("[uploadToImageKit] question-bank scope forbidden; retrying with website scope");
+    authParams = await fetchAuthParams("website");
   }
 
   const { token, expire, signature } = authParams;
