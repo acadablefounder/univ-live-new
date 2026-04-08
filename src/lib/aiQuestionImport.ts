@@ -33,6 +33,28 @@ export type AiImportResponse = {
   };
 };
 
+/**
+ * Real-time progress update for each page being processed
+ */
+export type PageProgressUpdate = {
+  pageNumber: number;
+  totalPages: number;
+  status: "detecting" | "detected" | "accepted" | "complete";
+  message: string;
+  pageQuestionsDetected: number;
+  pageQuestionsAccepted: number;
+  cumulativeDetected: number;
+  cumulativeAccepted: number;
+};
+
+/**
+ * Callback fired when new questions are detected and ready to add to preview
+ */
+export type QuestionsDetectedCallback = (
+  newQuestions: AiImportPreviewItem[],
+  pageNumber: number
+) => void;
+
 // ---------------------------------------------------------------------------
 // pdf.js – renders each page to a canvas image (not text extraction)
 // ---------------------------------------------------------------------------
@@ -118,7 +140,9 @@ async function renderPageToImage(
  * Each page is rendered to an image on the client, sent individually to the
  * backend, and results are aggregated with globally-unique sourceIndex values.
  *
- * An optional `onPageProgress` callback reports progress to the UI.
+ * An optional `onPageProgress` callback reports detailed progress for each page.
+ * An optional `onQuestionsDetected` callback is fired when new questions are ready
+ * to add to the preview in real-time (before all pages complete).
  */
 export async function importQuestionsFromPdf(
   file: File,
@@ -127,8 +151,9 @@ export async function importQuestionsFromPdf(
     subject?: string;
     educatorId?: string;
   },
-  onPageProgress?: (completed: number, total: number) => void,
-  abortSignal?: AbortSignal
+  onPageProgress?: (update: PageProgressUpdate) => void,
+  abortSignal?: AbortSignal,
+  onQuestionsDetected?: QuestionsDetectedCallback
 ): Promise<AiImportResponse> {
   const pdfjs = await loadPdfJs();
   const data = new Uint8Array(await file.arrayBuffer());
@@ -148,12 +173,38 @@ export async function importQuestionsFromPdf(
   let globalIndex = 0;
   let consecutiveErrors = 0;
   const MAX_CONSECUTIVE_ERRORS = 3;
+  let cumulativeDetected = 0;
+  let cumulativeAccepted = 0;
+  let backoffDelay = 3000; // Start with 3 second delay between pages (increased from 1s)
+  const MAX_BACKOFF = 15000; // Cap at 15 seconds (increased from 10s)
+  let rateLimitCount = 0; // Track how many times we hit rate limit
+
+  // Helper to add delay between requests
+  const delayMs = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    // Add delay before processing (except for first page)
+    if (pageNum > 1) {
+      console.log(`[importQuestionsFromPdf] Waiting ${backoffDelay}ms before page ${pageNum}...`);
+      await delayMs(backoffDelay);
+    }
+
     // Check if import was cancelled from outside
     if (abortSignal?.aborted) {
       throw new Error("PDF import cancelled by user");
     }
+
+    // Report: Image detected for this page
+    onPageProgress?.({
+      pageNumber: pageNum,
+      totalPages: numPages,
+      status: "detecting",
+      message: `Image detected for page ${pageNum}. Sending to AI...`,
+      pageQuestionsDetected: 0,
+      pageQuestionsAccepted: 0,
+      cumulativeDetected,
+      cumulativeAccepted,
+    });
 
     // Check if import was cancelled by creating a fresh signal per page
     const controller = new AbortController();
@@ -161,6 +212,8 @@ export async function importQuestionsFromPdf(
 
     let res: Response;
     let pageData: AiImportResponse | null = null;
+    let pageQuestionsDetected = 0;
+    let pageQuestionsAccepted = 0;
 
     try {
       res = await fetch("/api/ai/import-test-questions", {
@@ -212,7 +265,23 @@ export async function importQuestionsFromPdf(
                 const event = JSON.parse(jsonStr);
                 if (event.type === "complete" && event.data) {
                   pageData = event.data as AiImportResponse;
+                  pageQuestionsDetected = pageData.items?.length ?? 0;
                   consecutiveErrors = 0; // Reset error counter on success
+                  
+                  // Report: Questions detected
+                  if (pageQuestionsDetected > 0) {
+                    cumulativeDetected += pageQuestionsDetected;
+                    onPageProgress?.({
+                      pageNumber: pageNum,
+                      totalPages: numPages,
+                      status: "detected",
+                      message: `Detected ${pageQuestionsDetected} question${pageQuestionsDetected !== 1 ? "s" : ""}`,
+                      pageQuestionsDetected,
+                      pageQuestionsAccepted: 0,
+                      cumulativeDetected,
+                      cumulativeAccepted,
+                    });
+                  }
                 } else if (event.type === "error") {
                   hasError = true;
                   consecutiveErrors++;
@@ -244,17 +313,62 @@ export async function importQuestionsFromPdf(
           consecutiveErrors++;
           throw new Error(`API error: ${res.status}`);
         }
+
+        pageQuestionsDetected = pageData.items?.length ?? 0;
+        if (pageQuestionsDetected > 0) {
+          cumulativeDetected += pageQuestionsDetected;
+          onPageProgress?.({
+            pageNumber: pageNum,
+            totalPages: numPages,
+            status: "detected",
+            message: `Detected ${pageQuestionsDetected} question${pageQuestionsDetected !== 1 ? "s" : ""}`,
+            pageQuestionsDetected,
+            pageQuestionsAccepted: 0,
+            cumulativeDetected,
+            cumulativeAccepted,
+          });
+        }
       }
 
       // If we got here, processing was successful
       if (pageData?.items) {
+        const pageNewItems: AiImportPreviewItem[] = [];
+        
         for (const item of pageData.items || []) {
           globalIndex += 1;
           allItems.push({
             ...item,
             sourceIndex: globalIndex,
           });
+          // Count accepted items (ready or partial)
+          if (item.status !== "rejected") {
+            pageQuestionsAccepted++;
+          }
+          // Track new items for callback
+          pageNewItems.push({
+            ...item,
+            sourceIndex: globalIndex,
+            include: item.status === "ready",
+          });
         }
+        cumulativeAccepted += pageQuestionsAccepted;
+
+        // Fire callback to add questions to preview in real-time
+        if (pageNewItems.length > 0) {
+          onQuestionsDetected?.(pageNewItems, pageNum);
+        }
+
+        // Report: Page complete with accepted count
+        onPageProgress?.({
+          pageNumber: pageNum,
+          totalPages: numPages,
+          status: "accepted",
+          message: `Accepted ${pageQuestionsAccepted} of ${pageQuestionsDetected} question${pageQuestionsDetected !== 1 ? "s" : ""}`,
+          pageQuestionsDetected,
+          pageQuestionsAccepted,
+          cumulativeDetected,
+          cumulativeAccepted,
+        });
       }
     } catch (pageErr: any) {
       // Check if this was a cancellation error
@@ -262,9 +376,40 @@ export async function importQuestionsFromPdf(
         throw new Error("PDF import cancelled by user");
       }
 
-      // Check if it's an API error
-      if (pageErr instanceof Error && pageErr.message.includes("API error")) {
+      // Check if it's a rate limit error (429 or "Too many requests")
+      const errorMsg = pageErr instanceof Error ? pageErr.message : String(pageErr);
+      const isRateLimit = 
+        errorMsg.includes("Too many requests") || 
+        errorMsg.includes("429") ||
+        errorMsg.includes("rate limit");
+
+      if (isRateLimit) {
+        // Increase backoff delay aggressively on rate limit
+        console.warn(`[importQuestionsFromPdf] Rate limit hit on page ${pageNum}. Increasing backoff delay from ${backoffDelay}ms.`);
+        rateLimitCount++;
+        
+        // More aggressive backoff: triple the delay each time we hit rate limit
+        backoffDelay = Math.min(backoffDelay * 3, MAX_BACKOFF);
+        console.warn(`[importQuestionsFromPdf] New backoff delay: ${backoffDelay}ms (rate limit count: ${rateLimitCount})`);
+        
+        consecutiveErrors = 0; // Don't count rate limits as regular errors
+        
+        // Report the rate limit issue but continue
+        onPageProgress?.({
+          pageNumber: pageNum,
+          totalPages: numPages,
+          status: "complete",
+          message: `Page ${pageNum} paused (rate limited). Waiting ${Math.round(backoffDelay/1000)}s before retry...`,
+          pageQuestionsDetected: 0,
+          pageQuestionsAccepted: 0,
+          cumulativeDetected,
+          cumulativeAccepted,
+        });
+      } else if (pageErr instanceof Error && pageErr.message.includes("API error")) {
         console.error(`Failed to process page ${pageNum}:`, pageErr);
+        consecutiveErrors++;
+        // Increase backoff slightly on other API errors too
+        backoffDelay = Math.min(backoffDelay * 1.5, MAX_BACKOFF);
 
         // Stop if we have too many consecutive errors
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
@@ -277,6 +422,8 @@ export async function importQuestionsFromPdf(
         // For other errors, just log and continue
         console.error(`Failed to process page ${pageNum}:`, pageErr);
         consecutiveErrors++;
+        // Increase backoff slightly
+        backoffDelay = Math.min(backoffDelay * 1.3, MAX_BACKOFF);
 
         if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
           throw new Error(
@@ -289,8 +436,17 @@ export async function importQuestionsFromPdf(
       clearTimeout(timeoutId);
     }
 
-    // Report progress
-    onPageProgress?.(pageNum, numPages);
+    // Report final status for this page
+    onPageProgress?.({
+      pageNumber: pageNum,
+      totalPages: numPages,
+      status: "complete",
+      message: `Page ${pageNum} complete. Total: ${cumulativeDetected} detected, ${cumulativeAccepted} accepted`,
+      pageQuestionsDetected,
+      pageQuestionsAccepted,
+      cumulativeDetected,
+      cumulativeAccepted,
+    });
   }
 
   // Build aggregate summary
@@ -346,6 +502,25 @@ function cleanText(input: string) {
   return String(input || "").replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Strips leading option labels (A., B., C., D., A), A:, etc.) from option text
+ * Examples:
+ *   "A. Water" → "Water"
+ *   "B) Oxygen" → "Oxygen"
+ *   "C: Carbon" → "Carbon"
+ *   "D - Nitrogen" → "Nitrogen"
+ */
+function stripOptionLabel(optionText: string): string {
+  const cleaned = cleanText(optionText);
+  // Match patterns like "A.", "A)", "A:", "A -", "A ", etc.
+  // Handles: A. B) C: D - and variations
+  const match = cleaned.match(/^[A-D][\.\)\:\-\s]+(.+)$/);
+  if (match && match[1]) {
+    return cleanText(match[1]);
+  }
+  return cleaned;
+}
+
 function buildPlaceholderOption(index: number) {
   return `[Review Required] Option ${String.fromCharCode(65 + index)}`;
 }
@@ -354,7 +529,7 @@ export function buildImportedQuestionPayload(item: AiImportPreviewItem) {
   const cleanQuestion = cleanText(item.question);
   const options = Array.isArray(item.options)
     ? item.options
-        .map((option) => cleanText(option))
+        .map((option) => stripOptionLabel(option)) // Strip A, B, C, D prefixes
         .filter(Boolean)
         .slice(0, 4)
     : [];

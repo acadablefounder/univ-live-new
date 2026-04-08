@@ -32,12 +32,14 @@ import { toast } from "sonner";
 
 import EmptyState from "@/components/educator/EmptyState";
 import AiQuestionImportOverlay from "@/components/educator/AiQuestionImportOverlay";
+import InlineStatusTracker from "@/components/educator/InlineStatusTracker";
 import {
   buildImportedQuestionPayload,
   formatNegativeMarksDisplay,
   importQuestionsFromPdf,
   type AiImportPreviewItem,
   type AiImportSummary,
+  type PageProgressUpdate,
 } from "@/lib/aiQuestionImport";
 import { uploadToImageKit } from "@/lib/imagekitUpload";
 
@@ -105,8 +107,9 @@ function normalizeQuestionDoc(id: string, data: any): TestQuestion {
     data?.correctOption ?? data?.correctOptionIndex ?? data?.correctOptionIndex ?? 0
   );
 
-  const marks = data?.marks ?? data?.positiveMarks;
-  const negativeMarks = data?.negativeMarks ?? data?.negative ?? data?.negMarks;
+  // Always normalize to +5 marks and -1 negative marks
+  const marks = 5;
+  const negativeMarks = -1;
 
   const difficulty = (data?.difficulty as Difficulty) || "medium";
 
@@ -119,8 +122,8 @@ function normalizeQuestionDoc(id: string, data: any): TestQuestion {
     difficulty,
     subject: data?.subject ? String(data.subject) : "",
     topic: data?.topic ? String(data.topic) : "",
-    marks: marks != null && marks !== "" ? Number(marks) : undefined,
-    negativeMarks: negativeMarks != null && negativeMarks !== "" ? Number(negativeMarks) : undefined,
+    marks: marks,
+    negativeMarks: negativeMarks,
     isActive: data?.isActive !== false,
     createdAt: data?.createdAt,
     updatedAt: data?.updatedAt,
@@ -157,9 +160,16 @@ async function appendImageToField(current: string, folder = "/test-questions") {
   const f = await pickImageFile();
   if (!f) return { next: current, url: null };
 
-  const { url } = await uploadToImageKit(f, f.name, folder);
-  const imgTag = `\n<img src="${url}" alt="" />\n`;
-  return { next: (current || "") + imgTag, url };
+  try {
+    // Use "website" scope so educators can upload (question-bank scope is admin-only)
+    const { url } = await uploadToImageKit(f, f.name, folder, "website");
+    const imgTag = `\n<img src="${url}" alt="" />\n`;
+    return { next: (current || "") + imgTag, url };
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : "Failed to upload image";
+    console.error("[Image Upload Error]", errorMsg);
+    throw error; // Re-throw so caller can handle
+  }
 }
 
 export default function TestSeries() {
@@ -631,6 +641,7 @@ function QuestionsManager({
   const [importFileName, setImportFileName] = useState("");
   const [importSummary, setImportSummary] = useState<AiImportSummary | null>(null);
   const [importItems, setImportItems] = useState<AiImportPreviewItem[]>([]);
+  const [importProgressUpdates, setImportProgressUpdates] = useState<PageProgressUpdate[]>([]);
   const pdfInputRef = useRef<HTMLInputElement | null>(null);
   const importAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -855,21 +866,23 @@ function QuestionsManager({
     setImportPreviewOpen(true);
     setImportItems([]);
     setImportSummary(null);
+    setImportProgressUpdates([]);
 
     try {
       const result = await importQuestionsFromPdf(
         file,
         { testTitle, subject: testSubject, educatorId: educatorUid },
-        (completed, total) => {
-          toast.info(`Processing page ${completed} of ${total}...`, { id: "pdf-progress" });
+        (update) => {
+          setImportProgressUpdates((prev) => [...prev, update]);
         },
-        importAbortControllerRef.current.signal
+        importAbortControllerRef.current.signal,
+        // Callback to add questions in real-time as they're detected
+        (newQuestions, pageNum) => {
+          console.log(`[PDF Import] Adding ${newQuestions.length} questions from page ${pageNum}`);
+          setImportItems((prev) => [...prev, ...newQuestions]);
+        }
       );
-      const previewItems: AiImportPreviewItem[] = (result.items || []).map((item) => ({
-        ...item,
-        include: item.status === "ready",
-      }));
-      setImportItems(previewItems);
+      // Update summary at the end (questions already added via callback)
       setImportSummary(result.summary || null);
       toast.success("AI import preview is ready");
     } catch (error) {
@@ -878,8 +891,6 @@ function QuestionsManager({
       // Don't show error toast if it was cancelled
       if (!errorMsg.includes("cancelled")) {
         toast.error(errorMsg);
-      } else {
-        toast.info("PDF import cancelled");
       }
       setImportPreviewOpen(false);
     } finally {
@@ -893,6 +904,7 @@ function QuestionsManager({
       importAbortControllerRef.current.abort();
       setImportBusy(false);
       setImportPreviewOpen(false);
+      setImportProgressUpdates([]); // Clear progress tracker
       toast.info("PDF import cancelled");
     }
   }
@@ -950,6 +962,7 @@ function QuestionsManager({
       setImportPreviewOpen(false);
       setImportItems([]);
       setImportSummary(null);
+      setImportProgressUpdates([]); // Clear progress tracker
       if (!editorOpen) openNew();
     } catch (error) {
       console.error(error);
@@ -1001,6 +1014,10 @@ function QuestionsManager({
                   await handlePdfSelected(file);
                 }}
               />
+
+              {importProgressUpdates.length > 0 && (
+                <InlineStatusTracker updates={importProgressUpdates} isProcessing={importBusy} />
+              )}
 
               <div className="relative">
                 <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
@@ -1145,8 +1162,9 @@ function QuestionsManager({
                           setFormQuestion(next);
                           toast.success("Image added");
                         } catch (e) {
-                          console.error(e);
-                          toast.error("Image upload failed");
+                          const msg = e instanceof Error ? e.message : "Image upload failed";
+                          console.error("[Image upload error]", msg);
+                          toast.error(msg);
                         } finally {
                           setImgBusy(null);
                         }
@@ -1184,8 +1202,9 @@ function QuestionsManager({
                               setFormOptions((prev) => prev.map((v, i) => (i === idx ? next : v)));
                               toast.success("Image added");
                             } catch (e) {
-                              console.error(e);
-                              toast.error("Image upload failed");
+                              const msg = e instanceof Error ? e.message : "Image upload failed";
+                              console.error("[Image upload error]", msg);
+                              toast.error(msg);
                             } finally {
                               setImgBusy(null);
                             }
@@ -1292,8 +1311,9 @@ function QuestionsManager({
                           setFormExplanation(next);
                           toast.success("Image added");
                         } catch (e) {
-                          console.error(e);
-                          toast.error("Image upload failed");
+                          const msg = e instanceof Error ? e.message : "Image upload failed";
+                          console.error("[Image upload error]", msg);
+                          toast.error(msg);
                         } finally {
                           setImgBusy(null);
                         }
@@ -1353,7 +1373,10 @@ function QuestionsManager({
           importing={importBusy}
           saving={savingImported}
           onClose={() => {
-            if (!savingImported && !importBusy) setImportPreviewOpen(false);
+            if (!savingImported && !importBusy) {
+              setImportPreviewOpen(false);
+              setImportProgressUpdates([]); // Clear progress tracker
+            }
           }}
           onCancel={cancelPdfImport}
           onItemIncludeChange={updateImportItemInclude}
