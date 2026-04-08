@@ -28,13 +28,15 @@ Created a new utility module for handling streaming responses with:
 - ✅ Improved error handling with user-friendly messages
 - ✅ Faster initial response time with progressive updates
 
-#### `/api/ai/analyze-performance.ts`
+#### `/api/ai/import-test-questions.ts`
 - ✅ Uses streaming responses
 - ✅ Sends progress updates:
-  - "Analyzing your performance..."
-  - "Identifying weak areas and strong concepts..."
-  - "Generating personalized study recommendations..."
+  - "Processing page from PDF document..."
+  - "Extracting MCQ questions with AI..."
+  - "Found {n} questions. Processing diagrams..."
+  - "Finalizing results..."
 - ✅ Better error messages for users
+- ✅ Handles multi-step process with continuous feedback
 
 ### 3. **Environment Configuration**
 Fixed `.env` file:
@@ -213,6 +215,7 @@ async function triggerAIAnalysis(...) {
 ✅ AIReviewPanel enhanced with progress/error display
 ✅ Error messages made user-friendly
 ✅ Request cancellation implemented
+✅ import-test-questions endpoint updated with streaming
 ✅ Tests updated (if any)
 
 ## Testing Guide
@@ -279,7 +282,8 @@ async function triggerAIAnalysis(...) {
 │   ├── _lib/aiStreamingUtils.ts (NEW)
 │   └── ai/
 │       ├── generate-website-content.ts (UPDATED)
-│       └── analyze-performance.ts (UPDATED)
+│       ├── analyze-performance.ts (UPDATED)
+│       └── import-test-questions.ts (UPDATED)
 ├── src/
 │   ├── hooks/useAIStream.ts (NEW)
 │   ├── pages/
