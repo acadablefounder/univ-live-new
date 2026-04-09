@@ -1,3 +1,5 @@
+import { aiFeatureFlags, getAiFeatureDisabledMessage } from "@/lib/aiFeatureFlags";
+
 export type AiImportStatus = "ready" | "partial" | "rejected";
 
 export type AiImportPreviewItem = {
@@ -155,6 +157,10 @@ export async function importQuestionsFromPdf(
   abortSignal?: AbortSignal,
   onQuestionsDetected?: QuestionsDetectedCallback
 ): Promise<AiImportResponse> {
+  if (!aiFeatureFlags.pdfImport) {
+    throw new Error(getAiFeatureDisabledMessage("pdfImport"));
+  }
+
   const pdfjs = await loadPdfJs();
   const data = new Uint8Array(await file.arrayBuffer());
   const loadingTask = pdfjs.getDocument({
