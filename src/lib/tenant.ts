@@ -1,5 +1,26 @@
 const LOCAL_TENANT_KEY = "univ_local_tenant";
 
+function sanitizeDomain(rawDomain: string): string {
+  const cleaned = String(rawDomain || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "")
+    .replace(/^\.+|\.+$/g, "")
+    .replace(/^www\./, "");
+
+  return cleaned || "univ.live";
+}
+
+export function getConfiguredAppDomain(): string {
+  const fromEnv =
+    (import.meta.env.VITE_APP_DOMAIN as string | undefined) ||
+    (import.meta.env.VITE_APP_BASE_DOMAIN as string | undefined) ||
+    "univ.live";
+  return sanitizeDomain(fromEnv);
+}
+
 function normalizeSlug(value: string | null | undefined): string | null {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return null;
@@ -17,6 +38,15 @@ function getTenantFromQuery(): string | null {
 
 function isPreviewHost(hostname: string): boolean {
   return hostname.endsWith(".vercel.app");
+}
+
+function isLocalHost(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".lvh.me")
+  );
 }
 
 function isReservedSubdomain(subdomain: string): boolean {
@@ -49,7 +79,7 @@ export function getTenantSlugFromHostname(hostnameArg?: string): string | null {
     (hostnameArg || (typeof window !== "undefined" ? window.location.hostname : "")).toLowerCase();
   const tenantFromQuery = getTenantFromQuery();
 
-  const appDomain = (import.meta.env.VITE_APP_DOMAIN || "univ.live").toLowerCase();
+  const appDomain = getConfiguredAppDomain();
 
   // LOCAL DEV SUPPORT
   if (hostname === "localhost" || hostname === "127.0.0.1") {
@@ -100,5 +130,25 @@ export function getTenantSlugFromHostname(hostnameArg?: string): string | null {
   }
 
   return normalizeSlug(subdomain);
+}
+
+export function buildTenantUrl(tenantSlug: string, path = "/"): string {
+  const normalizedSlug = normalizeSlug(tenantSlug);
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+  if (!normalizedSlug) return normalizedPath;
+
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname.toLowerCase();
+    const protocol = window.location.protocol || "https:";
+
+    if (isLocalHost(hostname) || isPreviewHost(hostname)) {
+      const url = new URL(normalizedPath, `${protocol}//${hostname}`);
+      url.searchParams.set("tenant", normalizedSlug);
+      return url.toString();
+    }
+  }
+
+  return `https://${normalizedSlug}.${getConfiguredAppDomain()}${normalizedPath}`;
 }
 

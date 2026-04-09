@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn, stringToColor } from "@/lib/utils";
+import { buildTenantUrl } from "@/lib/tenant";
 import univLogo from "@/assets/univ-logo-1.png";
 import { useAuth } from "@/contexts/AuthProvider";
 import { signOut } from "firebase/auth";
@@ -122,15 +123,7 @@ export default function EducatorLayout() {
       return;
     }
 
-    const hostname = window.location.hostname;
-    if (hostname === "localhost" || hostname === "127.0.0.1") {
-      window.open(`/?tenant=${encodeURIComponent(tenantSlug)}`, "_blank");
-      return;
-    }
-
-    const parts = hostname.split(".");
-    const rootDomain = parts.length >= 2 ? parts.slice(-2).join(".") : hostname;
-    window.open(`https://${tenantSlug}.${rootDomain}`, "_blank");
+    window.open(buildTenantUrl(tenantSlug, "/"), "_blank");
   };
 
   return (

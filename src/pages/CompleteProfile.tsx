@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTenant } from "@/contexts/TenantProvider";
+import { buildTenantUrl } from "@/lib/tenant";
 
 type RoleUI = "student" | "educator";
 
@@ -33,15 +34,8 @@ function normSlug(raw: string) {
     .replace(/(^-|-$)/g, "");
 }
 
-function appDomain() {
-  return (import.meta as any).env?.VITE_APP_DOMAIN || "univ.live";
-}
-
 function studentRedirectUrl(tenantSlug: string) {
-  if (window.location.hostname === "localhost") {
-    return `/student?tenant=${encodeURIComponent(tenantSlug)}`;
-  }
-  return `https://${tenantSlug}.${appDomain()}/student`;
+  return buildTenantUrl(tenantSlug, "/student");
 }
 
 export default function CompleteProfile() {
