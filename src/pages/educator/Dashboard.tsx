@@ -6,6 +6,8 @@ import {
   FileText,
   KeyRound,
   Trophy,
+  Copy,
+  Check,
 } from "lucide-react";
 import {
   Area,
@@ -32,8 +34,10 @@ import ChartCard from "@/components/educator/ChartCard";
 import ActivityFeed, { type EducatorActivity } from "@/components/educator/ActivityFeed";
 import EmptyState from "@/components/educator/EmptyState";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthProvider";
+import { buildTenantUrl } from "@/lib/tenant";
 
 type StudentDoc = {
   id: string;
@@ -158,6 +162,10 @@ function weekdayLabel(date: Date) {
   return date.toLocaleString(undefined, { weekday: "short" });
 }
 
+function shortDateLabel(date: Date) {
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function relativeTime(ms: number | null) {
   if (!ms) return "—";
   const diff = Date.now() - ms;
@@ -233,6 +241,9 @@ export default function EducatorDashboard() {
   const [selectedTopSubject, setSelectedTopSubject] = useState("all");
   const [selectedTopTest, setSelectedTopTest] = useState("all");
   const [topPerformerLimit, setTopPerformerLimit] = useState("10");
+  const [copiedCoachingUrl, setCopiedCoachingUrl] = useState(false);
+  const [studentGrowthPeriod, setStudentGrowthPeriod] = useState("30");
+  const [attemptsPeriod, setAttemptsPeriod] = useState("30");
 
   useEffect(() => {
     if (!educatorId) {
@@ -402,43 +413,75 @@ export default function EducatorDashboard() {
     countInWindow(tests, (test) => toMillis(test.createdAt), previousPeriodStart, previousPeriodEnd)
   );
 
-  const last6Months = useMemo(() => {
+  const coachingName =
+    String(
+      educatorDoc?.coachingName ||
+        educatorDoc?.displayName ||
+        educatorDoc?.name ||
+        profile?.displayName ||
+        "Your Coaching"
+    ).trim() || "Your Coaching";
+
+  const coachingSlug = String(educatorDoc?.tenantSlug || profile?.tenantSlug || "").trim();
+  const coachingUrl = coachingSlug ? buildTenantUrl(coachingSlug, "/") : "";
+  const seatLimit = Math.max(0, safeNum(educatorDoc?.seatLimit, 0));
+  const activeSeatCount = seats.filter((seat) => String(seat.status || "").toLowerCase() === "active").length;
+
+  async function handleCopyCoachingUrl() {
+    if (!coachingUrl) return;
+
+    try {
+      await navigator.clipboard.writeText(coachingUrl);
+      setCopiedCoachingUrl(true);
+      setTimeout(() => setCopiedCoachingUrl(false), 1800);
+    } catch {
+      // no-op: clipboard permission may be blocked
+    }
+  }
+
+  const growthDays = useMemo(() => {
     const rows: Date[] = [];
-    const now = new Date();
-    for (let offset = 5; offset >= 0; offset -= 1) {
-      rows.push(new Date(now.getFullYear(), now.getMonth() - offset, 1));
+    const totalDays = Math.max(1, safeNum(studentGrowthPeriod, 30));
+    for (let offset = totalDays - 1; offset >= 0; offset -= 1) {
+      rows.push(startOfDay(daysAgo(offset)));
     }
     return rows;
-  }, []);
+  }, [studentGrowthPeriod]);
 
   const studentGrowthData = useMemo(() => {
     const bucket: Record<string, number> = {};
+    growthDays.forEach((date) => {
+      bucket[date.toISOString()] = 0;
+    });
+
     students.forEach((student) => {
       const ms = toMillis(student.joinedAt || student.createdAt);
       if (ms == null) return;
-      const key = monthKey(new Date(ms));
-      bucket[key] = (bucket[key] || 0) + 1;
+      const key = startOfDay(new Date(ms)).toISOString();
+      if (!(key in bucket)) return;
+      bucket[key] += 1;
     });
 
     let cumulative = 0;
-    return last6Months.map((date) => {
-      cumulative += bucket[monthKey(date)] || 0;
+    return growthDays.map((date) => {
+      cumulative += bucket[date.toISOString()] || 0;
       return {
-        month: monthLabel(date),
+        month: growthDays.length <= 7 ? weekdayLabel(date) : shortDateLabel(date),
         students: cumulative,
       };
     });
-  }, [students, last6Months]);
+  }, [students, growthDays]);
 
-  const last7Days = useMemo(() => {
+  const attemptsDays = useMemo(() => {
     const rows: Date[] = [];
-    for (let offset = 6; offset >= 0; offset -= 1) rows.push(startOfDay(daysAgo(offset)));
+    const totalDays = Math.max(1, safeNum(attemptsPeriod, 30));
+    for (let offset = totalDays - 1; offset >= 0; offset -= 1) rows.push(startOfDay(daysAgo(offset)));
     return rows;
-  }, []);
+  }, [attemptsPeriod]);
 
   const attemptsData = useMemo(() => {
     const bucket: Record<string, { attempts: number; scores: number[] }> = {};
-    last7Days.forEach((date) => {
+    attemptsDays.forEach((date) => {
       bucket[date.toISOString()] = { attempts: 0, scores: [] };
     });
 
@@ -451,16 +494,16 @@ export default function EducatorDashboard() {
       if (isAttemptCompleted(attempt.status)) bucket[key].scores.push(safeNum(attempt.score, 0));
     });
 
-    return last7Days.map((date) => {
+    return attemptsDays.map((date) => {
       const key = date.toISOString();
       const row = bucket[key] || { attempts: 0, scores: [] };
       return {
-        day: weekdayLabel(date),
+        day: attemptsDays.length <= 7 ? weekdayLabel(date) : shortDateLabel(date),
         attempts: row.attempts,
         avgScore: Math.round(average(row.scores)),
       };
     });
-  }, [attempts, last7Days]);
+  }, [attempts, attemptsDays]);
 
   const subjectPerformanceData = useMemo(() => {
     const bucket: Record<string, { weak: number; moderate: number; strong: number }> = {};
@@ -570,9 +613,9 @@ export default function EducatorDashboard() {
       {
         studentId: string;
         totalScore: number;
-        totalMax: number;
+        totalAccuracy: number;
         attempts: number;
-        bestPercent: number;
+        bestScore: number;
         latestMs: number;
       }
     > = {};
@@ -583,24 +626,29 @@ export default function EducatorDashboard() {
 
       const score = safeNum(attempt.score, 0);
       const maxScore = safeNum(attempt.maxScore, 0);
-      const percent = maxScore > 0 ? (score / maxScore) * 100 : safeNum(attempt.accuracy, 0);
+      const accuracy =
+        attempt.accuracy != null
+          ? safeNum(attempt.accuracy, 0)
+          : maxScore > 0
+            ? (score / maxScore) * 100
+            : 0;
       const attemptMs = toMillis(attempt.submittedAt || attempt.updatedAt || attempt.createdAt) || 0;
 
       if (!byStudent[studentId]) {
         byStudent[studentId] = {
           studentId,
           totalScore: 0,
-          totalMax: 0,
+          totalAccuracy: 0,
           attempts: 0,
-          bestPercent: 0,
+          bestScore: 0,
           latestMs: 0,
         };
       }
 
       byStudent[studentId].attempts += 1;
       byStudent[studentId].totalScore += score;
-      byStudent[studentId].totalMax += maxScore;
-      byStudent[studentId].bestPercent = Math.max(byStudent[studentId].bestPercent, percent);
+      byStudent[studentId].totalAccuracy += accuracy;
+      byStudent[studentId].bestScore = Math.max(byStudent[studentId].bestScore, score);
       byStudent[studentId].latestMs = Math.max(byStudent[studentId].latestMs, attemptMs);
     });
 
@@ -608,21 +656,18 @@ export default function EducatorDashboard() {
 
     return Object.values(byStudent)
       .map((row) => {
-        const avgPercent =
-          row.totalMax > 0
-            ? (row.totalScore / row.totalMax) * 100
-            : row.bestPercent;
+        const avgAccuracy = row.attempts > 0 ? row.totalAccuracy / row.attempts : 0;
 
         return {
           ...row,
           name: studentNameMap[row.studentId] || "Learner",
-          avgPercent,
+          avgAccuracy,
         };
       })
       .sort((a, b) => {
-        if (b.avgPercent !== a.avgPercent) return b.avgPercent - a.avgPercent;
+        if (b.avgAccuracy !== a.avgAccuracy) return b.avgAccuracy - a.avgAccuracy;
+        if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
         if (b.attempts !== a.attempts) return b.attempts - a.attempts;
-        if (b.bestPercent !== a.bestPercent) return b.bestPercent - a.bestPercent;
         return b.latestMs - a.latestMs;
       })
       .slice(0, limit);
@@ -735,41 +780,89 @@ export default function EducatorDashboard() {
   return (
     <div className="space-y-6">
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-4">
-        <MetricCard
-          title="Total Students"
-          value={totalStudents.toLocaleString()}
-          change={{ value: Math.abs(deltaStudents), type: deltaStudents >= 0 ? "increase" : "decrease" }}
-          icon={Users}
-          iconColor="text-blue-500"
-          delay={0}
-        />
-        <MetricCard
-          title="Active Students"
-          value={activeStudents.toLocaleString()}
-          icon={UserCheck}
-          iconColor="text-green-500"
-          delay={0.05}
-        />
-        <MetricCard
-          title="Test Series"
-          value={totalTests.toLocaleString()}
-          change={{ value: Math.abs(deltaTests), type: deltaTests >= 0 ? "increase" : "decrease" }}
-          icon={FileText}
-          iconColor="text-purple-500"
-          delay={0.1}
-        />
-        <MetricCard
-          title="Active Codes"
-          value={activeAccessCodes.toLocaleString()}
-          icon={KeyRound}
-          iconColor="text-amber-500"
-          delay={0.35}
-        />
+      <div className="gradient-bg rounded-2xl p-4 md:p-6 space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between text-white">
+          <div>
+            <h2 className="text-xl md:text-2xl font-bold">Welcome back, {coachingName}! 👋</h2>
+            <p className="text-sm text-white/90 mt-1">Here is a quick snapshot of your coaching today.</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1">
+                Seats: {activeSeatCount}/{seatLimit || "-"}
+              </span>
+              <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1">
+                Learners: {totalStudents}
+              </span>
+              <span className="rounded-full border border-white/30 bg-white/15 px-3 py-1">
+                Tests: {totalTests}
+              </span>
+            </div>
+          </div>
+
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full md:w-auto bg-white/15 hover:bg-white/25 text-white border border-white/30"
+            onClick={handleCopyCoachingUrl}
+            disabled={!coachingUrl}
+          >
+            {copiedCoachingUrl ? (
+              <>
+                <Check className="h-4 w-4 mr-2" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="h-4 w-4 mr-2" />
+                Copy Coaching URL
+              </>
+            )}
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8 gap-4">
+          <MetricCard
+            title="Total Students"
+            value={totalStudents.toLocaleString()}
+            icon={Users}
+            iconColor="text-white"
+            blendWithGradient
+            delay={0}
+          />
+          <MetricCard
+            title="Active Students"
+            value={activeStudents.toLocaleString()}
+            icon={UserCheck}
+            iconColor="text-white"
+            blendWithGradient
+            delay={0.05}
+          />
+          <MetricCard
+            title="Test Series"
+            value={totalTests.toLocaleString()}
+            icon={FileText}
+            iconColor="text-white"
+            blendWithGradient
+            delay={0.1}
+          />
+          <MetricCard
+            title="Active Codes"
+            value={activeAccessCodes.toLocaleString()}
+            icon={KeyRound}
+            iconColor="text-white"
+            blendWithGradient
+            delay={0.35}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ChartCard title="Student Growth" showPeriodSelect delay={0.2}>
+        <ChartCard
+          title="Student Growth"
+          showPeriodSelect
+          periodValue={studentGrowthPeriod}
+          onPeriodChange={setStudentGrowthPeriod}
+          delay={0.2}
+        >
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={studentGrowthData}>
@@ -795,7 +888,13 @@ export default function EducatorDashboard() {
           </div>
         </ChartCard>
 
-        <ChartCard title="Attempts & Scores" showPeriodSelect delay={0.25}>
+        <ChartCard
+          title="Attempts"
+          showPeriodSelect
+          periodValue={attemptsPeriod}
+          onPeriodChange={setAttemptsPeriod}
+          delay={0.25}
+        >
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={attemptsData}>
@@ -825,7 +924,7 @@ export default function EducatorDashboard() {
               Top Performers
             </h3>
             <p className="text-xs md:text-sm text-muted-foreground">
-              Ranked by weighted score percentage based on selected filters.
+              Ranked by average accuracy based on selected filters.
             </p>
           </div>
 
@@ -902,8 +1001,8 @@ export default function EducatorDashboard() {
                   <th className="text-left py-2 pr-3 font-medium">Rank</th>
                   <th className="text-left py-2 pr-3 font-medium">Learner</th>
                   <th className="text-right py-2 pr-3 font-medium">Attempts</th>
-                  <th className="text-right py-2 pr-3 font-medium">Avg %</th>
-                  <th className="text-right py-2 font-medium">Best %</th>
+                  <th className="text-right py-2 pr-3 font-medium">Accuracy</th>
+                  <th className="text-right py-2 font-medium">Best Score</th>
                 </tr>
               </thead>
               <tbody>
@@ -923,8 +1022,8 @@ export default function EducatorDashboard() {
                       <td className={`py-2 pr-3 font-semibold ${rankClass}`}>#{rank}</td>
                       <td className="py-2 pr-3 font-medium">{performer.name}</td>
                       <td className="py-2 pr-3 text-right">{performer.attempts}</td>
-                      <td className="py-2 pr-3 text-right">{performer.avgPercent.toFixed(1)}%</td>
-                      <td className="py-2 text-right">{performer.bestPercent.toFixed(1)}%</td>
+                      <td className="py-2 pr-3 text-right">{performer.avgAccuracy.toFixed(1)}%</td>
+                      <td className="py-2 text-right">{performer.bestScore.toFixed(1)}</td>
                     </tr>
                   );
                 })}

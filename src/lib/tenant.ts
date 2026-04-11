@@ -141,9 +141,10 @@ export function buildTenantUrl(tenantSlug: string, path = "/"): string {
   if (typeof window !== "undefined") {
     const hostname = window.location.hostname.toLowerCase();
     const protocol = window.location.protocol || "https:";
+    const host = window.location.host || hostname;
 
     if (isLocalHost(hostname) || isPreviewHost(hostname)) {
-      const url = new URL(normalizedPath, `${protocol}//${hostname}`);
+      const url = new URL(normalizedPath, `${protocol}//${host}`);
       url.searchParams.set("tenant", normalizedSlug);
       return url.toString();
     }
