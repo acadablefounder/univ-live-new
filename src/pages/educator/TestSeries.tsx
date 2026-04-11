@@ -1118,12 +1118,52 @@ function QuestionsManager({
     });
   }, [questions, searchQ]);
 
+  const questionNumberById = useMemo(() => {
+    const numberMap = new Map<string, number>();
+    questions.forEach((q, index) => {
+      const persistedOrder = Number(q.questionOrder);
+      const displayOrder = Number.isFinite(persistedOrder) && persistedOrder > 0 ? persistedOrder : index + 1;
+      numberMap.set(q.id, displayOrder);
+    });
+    return numberMap;
+  }, [questions]);
+
   function getNextQuestionOrder() {
     const maxOrder = questions.reduce((max, q) => {
       const n = Number(q.questionOrder);
       return Number.isFinite(n) ? Math.max(max, n) : max;
     }, 0);
     return maxOrder + 1;
+  }
+
+  async function resequenceQuestionOrders(remainingQuestions: TestQuestion[]) {
+    const ordered = sortQuestionsForDisplay(remainingQuestions);
+    const updates = ordered
+      .map((q, index) => {
+        const nextOrder = index + 1;
+        const currentOrder = Number(q.questionOrder);
+        return {
+          id: q.id,
+          nextOrder,
+          currentOrder: Number.isFinite(currentOrder) ? currentOrder : null,
+        };
+      })
+      .filter((item) => item.currentOrder !== item.nextOrder);
+
+    if (!updates.length) return;
+
+    const CHUNK_SIZE = 450;
+    for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+      const batch = writeBatch(db);
+      const chunk = updates.slice(i, i + CHUNK_SIZE);
+      chunk.forEach((item) => {
+        batch.update(doc(qCol, item.id), {
+          questionOrder: item.nextOrder,
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+    }
   }
 
   function resetEditor() {
@@ -1232,6 +1272,14 @@ function QuestionsManager({
     if (!confirm("Delete this question?")) return;
     try {
       await deleteDoc(doc(qCol, id));
+      const remaining = questions.filter((q) => q.id !== id);
+      await resequenceQuestionOrders(remaining);
+      setQuestions(
+        sortQuestionsForDisplay(remaining).map((q, index) => ({
+          ...q,
+          questionOrder: index + 1,
+        }))
+      );
       await syncTestQuestionCount();
       toast.success("Deleted");
       if (editingId === id) {
@@ -1542,7 +1590,7 @@ function QuestionsManager({
               ) : filteredQuestions.length === 0 ? (
                 <p className="text-center text-sm text-muted-foreground py-10">No questions yet.</p>
               ) : (
-                filteredQuestions.map((q, idx) => (
+                filteredQuestions.map((q) => (
                   <div
                     key={q.id}
                     onClick={() => openEdit(q)}
@@ -1551,7 +1599,7 @@ function QuestionsManager({
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="font-medium line-clamp-2">
-                          Q{idx + 1}: {stripHtml(q.question) || "(empty)"}
+                          Q{questionNumberById.get(q.id) ?? "-"}: {stripHtml(q.question) || "(empty)"}
                         </div>
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           <Badge variant="secondary" className="text-[10px] rounded-full">

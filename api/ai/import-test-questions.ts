@@ -5,6 +5,7 @@ import { VercelRequest, VercelResponse } from "@vercel/node";
 // so that large Base64-encoded page images are accepted without a 413 error.
 // ---------------------------------------------------------------------------
 export const config = {
+  maxDuration: 60, // Allow up to 60s for Gemini vision processing
   api: {
     bodyParser: {
       sizeLimit: "10mb",
@@ -49,7 +50,12 @@ type GeminiMcqItem = {
   sourceIndex: number;
   status: "ready" | "partial" | "rejected";
   question: string;
-  options: string[];
+  options: {
+    a?: string;
+    b?: string;
+    c?: string;
+    d?: string;
+  } | string[];
   correctOption: number | null;
   reasons: string[];
   rawBlock: string;
@@ -147,8 +153,14 @@ async function buildMcqSchema() {
             },
             question: { type: SchemaType.STRING },
             options: {
-              type: SchemaType.ARRAY,
-              items: { type: SchemaType.STRING },
+              type: SchemaType.OBJECT,
+              properties: {
+                a: { type: SchemaType.STRING },
+                b: { type: SchemaType.STRING },
+                c: { type: SchemaType.STRING },
+                d: { type: SchemaType.STRING },
+              },
+              required: ["a", "b", "c", "d"],
             },
             correctOption: { type: SchemaType.NUMBER, nullable: true },
             reasons: {
@@ -195,7 +207,10 @@ function buildSystemInstruction(context: {
     "Your task:",
     "1. Identify every single-correct Multiple Choice Question (MCQ) visible on the page.",
     "2. For each question, extract: the full question text (preserving math notation where possible),",
-    "   the options (A/B/C/D), and the correct option index (0-based: A=0, B=1, C=2, D=3).",
+    "   options as a JSON object exactly in this format:",
+    "   options: { \"a\": \"...\", \"b\": \"...\", \"c\": \"...\", \"d\": \"...\" }",
+    "   and the correct option index (0-based: A=0, B=1, C=2, D=3).",
+    "   IMPORTANT: option values must contain only answer text, not labels like 'A)', 'B.', or 'Option C'.",
     "3. If a question contains an associated diagram, figure, graph, chart, or embedded image,",
     "   return a bounding box in `questionImageBox` as [ymin, xmin, ymax, xmax] using Gemini's",
     "   standard 1000×1000 coordinate grid (0 = top-left, 1000 = bottom-right).",
@@ -208,13 +223,305 @@ function buildSystemInstruction(context: {
     "6. If a block is not a valid MCQ (e.g. instructions, headers, page numbers),",
     "   set status to 'rejected'.",
     "7. Do NOT invent or hallucinate any content. Only extract what is visually present.",
-    "8. Number each question sequentially starting from sourceIndex 1.",
-    "9. Keep rawBlock as a concise plain-text excerpt of the original question (max ~80 chars).",
+    "8. CRITICAL: Number each question sequentially starting from sourceIndex 1,",
+    "   following the EXACT top-to-bottom visual order as they appear on the page.",
+    "   If the page shows Q5, Q6, Q7, use sourceIndex 1, 2, 3 respectively (not 5, 6, 7).",
+    "   The items array MUST be ordered the same way — first item = first question on page.",
+    "9. Keep rawBlock as a concise plain-text excerpt of the ORIGINAL question text",
+    "   INCLUDING its original question number prefix (e.g. '12. What is...' or 'Q5) The ratio...').",
+    "   Max ~100 chars.",
     "10. Preserve mathematical expressions as closely as possible (use Unicode symbols",
     "    or LaTeX-like notation if clear from the page).",
     "",
     `Context — Test: "${context.testTitle || "Unknown"}", Subject: "${context.subject || "Unknown"}"`,
   ].join("\n");
+}
+
+function normalizeJsonCandidate(input: string) {
+  return String(input || "")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/,\s*([}\]])/g, "$1")
+    .trim();
+}
+
+function escapeControlCharsInJsonStrings(input: string) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+
+    if (inString) {
+      if (escaped) {
+        output += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        output += ch;
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        output += ch;
+        inString = false;
+        continue;
+      }
+      if (ch === "\n") {
+        output += "\\n";
+        continue;
+      }
+      if (ch === "\r") {
+        output += "\\r";
+        continue;
+      }
+      if (ch === "\t") {
+        output += "\\t";
+        continue;
+      }
+      output += ch;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+    }
+    output += ch;
+  }
+
+  return output;
+}
+
+function quoteUnquotedJsonKeys(input: string) {
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  let expectingKey = false;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const ch = input[i];
+
+    if (inString) {
+      output += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      output += ch;
+      continue;
+    }
+
+    if (ch === "{" || ch === ",") {
+      expectingKey = true;
+      output += ch;
+      continue;
+    }
+
+    if (expectingKey) {
+      if (/\s/.test(ch)) {
+        output += ch;
+        continue;
+      }
+
+      if (ch === '"') {
+        inString = true;
+        expectingKey = false;
+        output += ch;
+        continue;
+      }
+
+      if (/[A-Za-z_]/.test(ch)) {
+        let j = i + 1;
+        while (j < input.length && /[A-Za-z0-9_]/.test(input[j])) j += 1;
+        const key = input.slice(i, j);
+        let k = j;
+        while (k < input.length && /\s/.test(input[k])) k += 1;
+
+        if (input[k] === ":") {
+          output += `"${key}"`;
+          i = j - 1;
+          expectingKey = false;
+          continue;
+        }
+      }
+
+      expectingKey = false;
+    }
+
+    if (ch === "}") expectingKey = false;
+    if (ch === ":") expectingKey = false;
+
+    output += ch;
+  }
+
+  return output;
+}
+
+function parseGeminiJsonText(text: string): GeminiResponse {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("Gemini returned empty JSON text");
+
+  const candidates = new Set<string>();
+  candidates.add(raw);
+
+  const fencedMatch = raw.match(/```json\s*([\s\S]*?)\s*```/i) || raw.match(/```\s*([\s\S]*?)\s*```/i);
+  if (fencedMatch?.[1]) candidates.add(fencedMatch[1].trim());
+
+  const firstBrace = raw.indexOf("{");
+  const lastBrace = raw.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.add(raw.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    const normalized = quoteUnquotedJsonKeys(
+      escapeControlCharsInJsonStrings(normalizeJsonCandidate(candidate))
+    );
+    try {
+      const parsed = JSON.parse(normalized) as GeminiResponse;
+      if (parsed && Array.isArray(parsed.items)) return parsed;
+    } catch {
+      // keep trying other candidates
+    }
+  }
+
+  // ---------- Attempt to close truncated JSON and re-parse ----------
+  // Gemini sometimes hits the token limit, producing truncated JSON like:
+  //   { "items": [ { ... }, { "question": "some trun
+  // Strategy: find the last complete item boundary, close the array/object.
+  if (firstBrace >= 0) {
+    let truncated = raw.slice(firstBrace);
+    // Remove any trailing incomplete string value (text after last complete quote)
+    // Then brute-force close brackets/braces
+    for (let trimEnd = truncated.length; trimEnd > 0; trimEnd--) {
+      // Walk backwards to find the last cleanly closed object
+      const slice = truncated.slice(0, trimEnd);
+      // Count open/close braces and brackets outside strings
+      const closers = getRequiredClosers(slice);
+      if (closers === null) continue; // uncloseable (e.g. inside an unterminated string)
+      const attempt = slice + closers;
+      const normalized = quoteUnquotedJsonKeys(
+        escapeControlCharsInJsonStrings(normalizeJsonCandidate(attempt))
+      );
+      try {
+        const parsed = JSON.parse(normalized) as GeminiResponse;
+        if (parsed && Array.isArray(parsed.items) && parsed.items.length > 0) {
+          console.warn(`[parseGeminiJsonText] Recovered ${parsed.items.length} items from truncated JSON (trimmed ${truncated.length - trimEnd} trailing chars)`);
+          return parsed;
+        }
+      } catch {
+        // keep trimming
+      }
+    }
+  }
+
+  // ---------- Object-by-object partial recovery ----------
+  // Attempt partial recovery when JSON is truncated but contains complete item objects.
+  const itemsKeyIdx = raw.toLowerCase().indexOf('"items"');
+  if (itemsKeyIdx >= 0) {
+    const arrayStart = raw.indexOf("[", itemsKeyIdx);
+    if (arrayStart >= 0) {
+      const recovered: GeminiMcqItem[] = [];
+      let inString = false;
+      let escape = false;
+      let braceDepth = 0;
+      let objectStart = -1;
+
+      for (let i = arrayStart + 1; i < raw.length; i += 1) {
+        const ch = raw[i];
+
+        if (inString) {
+          if (escape) {
+            escape = false;
+          } else if (ch === "\\") {
+            escape = true;
+          } else if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+
+        if (ch === "{") {
+          if (braceDepth === 0) objectStart = i;
+          braceDepth += 1;
+          continue;
+        }
+
+        if (ch === "}") {
+          if (braceDepth > 0) {
+            braceDepth -= 1;
+            if (braceDepth === 0 && objectStart >= 0) {
+              const objectText = normalizeJsonCandidate(raw.slice(objectStart, i + 1));
+              try {
+                const repaired = quoteUnquotedJsonKeys(escapeControlCharsInJsonStrings(objectText));
+                recovered.push(JSON.parse(repaired) as GeminiMcqItem);
+              } catch {
+                // Skip malformed object and continue recovering others.
+              }
+              objectStart = -1;
+            }
+          }
+          continue;
+        }
+
+        if (ch === "]" && braceDepth === 0) break;
+      }
+
+      if (recovered.length > 0) {
+        console.warn(`[parseGeminiJsonText] Recovered ${recovered.length} complete item(s) via object-by-object extraction`);
+        return { items: recovered };
+      }
+    }
+  }
+
+  throw new Error("Gemini returned invalid JSON that could not be repaired");
+}
+
+/**
+ * Given a (possibly truncated) JSON string, compute the sequence of closing
+ * characters needed to make it valid. Returns null if the string ends inside
+ * an unterminated string literal (which we can't cleanly close).
+ */
+function getRequiredClosers(json: string): string | null {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (inString) {
+      if (escaped) { escaped = false; continue; }
+      if (ch === "\\") { escaped = true; continue; }
+      if (ch === '"') { inString = false; continue; }
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') { stack.push('}'); continue; }
+    if (ch === '[') { stack.push(']'); continue; }
+    if (ch === '}' || ch === ']') {
+      if (stack.length > 0 && stack[stack.length - 1] === ch) {
+        stack.pop();
+      }
+      continue;
+    }
+  }
+
+  // If we're still inside a string, we can't cleanly close — caller should trim more
+  if (inString) return null;
+
+  // Return the closers in reverse order
+  return stack.reverse().join("");
 }
 
 // ---------------------------------------------------------------------------
@@ -244,7 +551,7 @@ async function processWithGemini(
 
     const generationConfig: GenerationConfig = {
       temperature: 0.1,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 16384,
       responseMimeType: "application/json",
       responseSchema: mcqSchema as any, // SDK typing requires cast
     };
@@ -278,7 +585,7 @@ async function processWithGemini(
 
     let parsed: GeminiResponse;
     try {
-      parsed = JSON.parse(text) as GeminiResponse;
+      parsed = parseGeminiJsonText(text);
     } catch (jsonErr) {
       const jsonErr2 = jsonErr instanceof Error ? jsonErr.message : String(jsonErr);
       console.error(`[processWithGemini] JSON parsing error: ${jsonErr2}`);
@@ -449,6 +756,13 @@ function isRetryableError(err: any): boolean {
   if (errorMsg.includes("econnrefused") || errorMsg.includes("timeout")) {
     return true;
   }
+  if (
+    errorMsg.includes("invalid json") ||
+    errorMsg.includes("unterminated string") ||
+    errorMsg.includes("double-quoted property name")
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -570,10 +884,41 @@ export default async function handler(
       message: "Extracting MCQ questions with AI...",
     });
 
-    const geminiResult = await processWithGeminiRetry(imageBuffer, mimeType, {
-      testTitle,
-      subject,
-    });
+    let geminiResult: GeminiResponse;
+    try {
+      geminiResult = await processWithGeminiRetry(imageBuffer, mimeType, {
+        testTitle,
+        subject,
+      });
+    } catch (modelErr) {
+      const msg = (modelErr instanceof Error ? modelErr.message : String(modelErr)).toLowerCase();
+      const isMalformedJson =
+        msg.includes("invalid json") ||
+        msg.includes("unterminated string") ||
+        msg.includes("double-quoted property name") ||
+        msg.includes("could not be repaired");
+
+      if (!isMalformedJson) {
+        throw modelErr;
+      }
+
+      sendStreamEvent(res, {
+        type: "complete",
+        data: {
+          summary: { total: 0, ready: 0, partial: 0, rejected: 0 },
+          items: [],
+          meta: {
+            fileName,
+            pageNumber,
+            diagnostics: [
+              "AI returned malformed JSON for this page. Skipped this page and continued.",
+            ],
+          },
+        },
+      });
+      endStreaming(res);
+      return;
+    }
 
     const rawItems = Array.isArray(geminiResult?.items)
       ? geminiResult.items
