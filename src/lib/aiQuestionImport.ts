@@ -73,6 +73,41 @@ function hasValidCorrectOption(item: Omit<AiImportPreviewItem, "include">) {
   );
 }
 
+function extractLeadingQuestionNumber(text: string): number | null {
+  const value = String(text || "").trim();
+  if (!value) return null;
+
+  const patterns = [
+    /^(?:q(?:uestion)?\s*)?(\d{1,4})\s*[:.)\]-]/i,
+    /^\(\s*(\d{1,4})\s*\)/,
+    /^\[\s*(\d{1,4})\s*\]/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[1]) return Number(match[1]);
+  }
+
+  return null;
+}
+
+function orderItemsAsPdfSequence(items: Omit<AiImportPreviewItem, "include">[]) {
+  // Gemini is instructed to number questions sequentially (sourceIndex 1, 2, 3…)
+  // in the order they appear on the page. Trust that order first.
+  // Fall back to the original array index if sourceIndex is missing/invalid.
+  return [...items].sort((a, b) => {
+    const aIdx = Number.isFinite(a.sourceIndex) ? a.sourceIndex : Number.MAX_SAFE_INTEGER;
+    const bIdx = Number.isFinite(b.sourceIndex) ? b.sourceIndex : Number.MAX_SAFE_INTEGER;
+    if (aIdx !== bIdx) return aIdx - bIdx;
+
+    // Tie-break: try extracting a leading question number from rawBlock
+    const aLead = extractLeadingQuestionNumber(a.rawBlock || "") ?? extractLeadingQuestionNumber(a.question || "");
+    const bLead = extractLeadingQuestionNumber(b.rawBlock || "") ?? extractLeadingQuestionNumber(b.question || "");
+    if (aLead != null && bLead != null && aLead !== bLead) return aLead - bLead;
+    return 0;
+  });
+}
+
 function extractQuestionNumber(text: string): number | null {
   const value = String(text || "");
   if (!value.trim()) return null;
@@ -440,7 +475,7 @@ export async function importQuestionsFromPdf(
       // If we got here, processing was successful
       if (pageData?.items) {
         const pageNewItems: AiImportPreviewItem[] = [];
-        const pageItems = sortItemsBySourceIndex(pageData.items || []);
+        const pageItems = orderItemsAsPdfSequence(pageData.items || []);
         
         for (const item of pageItems) {
           globalIndex += 1;

@@ -222,9 +222,23 @@ function stripQuestionNumberPrefix(input: string) {
 
 export function normalizeImportedItem(item: any, fallbackIndex: number): ImportedQuestionItem {
   const question = stripQuestionNumberPrefix(String(item?.question || ""));
-  const options = Array.isArray(item?.options)
-    ? item.options.map((option: any) => String(option || "").trim()).filter(Boolean).slice(0, 4)
-    : [];
+  const options = (() => {
+    if (Array.isArray(item?.options)) {
+      return item.options
+        .map((option: any) => String(option || "").trim())
+        .filter(Boolean)
+        .slice(0, 4);
+    }
+
+    if (item?.options && typeof item.options === "object") {
+      return ["a", "b", "c", "d"]
+        .map((key) => String(item.options?.[key] || "").trim())
+        .filter(Boolean)
+        .slice(0, 4);
+    }
+
+    return [];
+  })();
 
   const rawCorrectOption = item?.correctOption;
   const correctOption =
