@@ -665,8 +665,8 @@ export default function EducatorDashboard() {
         };
       })
       .sort((a, b) => {
-        if (b.avgAccuracy !== a.avgAccuracy) return b.avgAccuracy - a.avgAccuracy;
         if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
+        if (b.avgAccuracy !== a.avgAccuracy) return b.avgAccuracy - a.avgAccuracy;
         if (b.attempts !== a.attempts) return b.attempts - a.attempts;
         return b.latestMs - a.latestMs;
       })
@@ -924,7 +924,7 @@ export default function EducatorDashboard() {
               Top Performers
             </h3>
             <p className="text-xs md:text-sm text-muted-foreground">
-              Ranked by average accuracy based on selected filters.
+              Ranked by best score first, then average accuracy based on selected filters.
             </p>
           </div>
 
